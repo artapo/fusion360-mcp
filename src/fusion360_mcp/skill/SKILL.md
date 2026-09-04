@@ -230,6 +230,39 @@ Collections have assorted `add*` methods — `sketchArcs` has
 `addByThreePoints`, `addByCenterStartSweep`, `addFillet`. Look for the right
 one before improvising.
 
+## Sketch plane orientation — local axes are not the global ones
+
+A sketch's local (x, y) maps onto global axes differently per plane, and two
+of the three flip a sign. Verified by placing a point at local (10, 0) and
+(0, 10) and reading `worldGeometry`:
+
+| Plane | local +x | local +y |
+|---|---|---|
+| `xYConstructionPlane` | +X | +Y |
+| `xZConstructionPlane` | +X | **−Z** |
+| `yZConstructionPlane` | **−Z** | +Y |
+
+The `yZ` case is the trap: neither local axis is Y-then-Z as the name
+suggests — local +x runs along **−Z**. On `xZ`, to place geometry at global
+Z = +150..+240 you sketch at local y = −240..−150.
+
+Don't reason it out — measure it. One point tells you the mapping:
+
+```python
+sk = root.sketches.add(root.yZConstructionPlane)
+p  = sk.sketchCurves.sketchLines.addByTwoPoints(
+        adsk.core.Point3D.create(0, 0, 0),
+        adsk.core.Point3D.create(1.0, 0, 0)).endSketchPoint.worldGeometry
+result = [p.x, p.y, p.z]      # -> [0, 0, -1]: local +x is global -Z
+```
+
+**`sketch.boundingBox` is in sketch space, not world space** — so it cannot
+confirm where geometry landed. The same rectangle reports `min.y = 28.5,
+min.z = 0` from the bounding box while its points are actually at
+`y = 0, z = -28.5`. To check a sketch's real position, read
+`worldGeometry` on a point; the bounding box will happily agree with a wrong
+mental model.
+
 ## Python: the gotchas
 
 **Out-args become tuples.** `Point3D.getData(out x, out y, out z)` in Python:
