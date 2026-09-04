@@ -8,6 +8,55 @@ description: Use when writing code for the Fusion 360 API via the fusion_eval MC
 Escrever código para `fusion_eval`. Tudo aqui foi verificado na documentação
 oficial da Autodesk (Fusion API User's Manual), não de memória.
 
+## Este arquivo cresce com o uso — contribua
+
+Se você é um agente trabalhando nesta base: **quando perder tempo com uma
+armadilha que não está aqui, documente antes de encerrar a tarefa.** Cada
+seção abaixo nasceu de um erro real que custou chamadas. Um método com nome
+diferente do esperado, uma assinatura que varia, uma operação que falha
+silenciosamente, um nome que muda com o idioma da UI — tudo isso vale uma
+entrada.
+
+O critério é simples: *isso me faria errar de novo daqui a um mês?* Se sim,
+escreva. Se foi erro de raciocínio seu e não da API, provavelmente não vale
+uma seção — no máximo uma linha de aviso onde o assunto já é tratado.
+
+Regras para contribuir:
+
+- **Verifique antes de escrever.** Rode o caso pelo `fusion_eval` e cole o
+  comportamento real, não o que você supõe. Uma linha errada aqui custa mais
+  caro que uma ausente, porque será seguida sem checagem.
+- **Documente a mensagem de erro junto da correção.** Quem cair na mesma
+  armadilha vai buscar pelo texto do erro, não pelo nome do conceito.
+- **Prefira o exemplo mínimo** que roda ao parágrafo explicativo.
+- **Corrija o que envelheceu.** Se uma seção contradiz o comportamento atual,
+  atualizá-la vale mais que acrescentar uma nova — uma skill que descreve
+  errado a ferramenta é pior que uma incompleta.
+- **Este arquivo existe em duas cópias:** `~/.claude/skills/fusion360-api/`
+  (a que carrega nas sessões) e `.claude/skills/fusion360-api/` no repo.
+  Elas já divergiram. A cópia do repo é a que vai no PR; sincronize a local
+  com ela para não trabalhar em cima de uma versão velha.
+
+### Como enviar
+
+Contribuição entra por **pull request** — ninguém commita direto na master.
+O mantenedor (@artapo) revisa e decide o que entra.
+
+- Um PR por achado. Dois achados sem relação em branches separadas revisam
+  mais rápido e não travam um no outro.
+- No corpo do PR, diga **o que você estava fazendo quando bateu na
+  armadilha**. O contexto é metade do valor: separa o caso geral do
+  acidente de percurso.
+- Cole a saída real do `fusion_eval` que comprova o comportamento — a
+  chamada que falhou e a que funcionou. É o que permite revisar sem
+  reproduzir tudo de novo.
+- Se você corrigiu algo que estava escrito errado aqui, diga isso no título.
+  Correção tem prioridade de revisão sobre acréscimo.
+
+Não espere aprovação para abrir o PR: abra, com a verificação junto. Espere
+aprovação para considerar o assunto documentado — enquanto o PR estiver
+aberto, o achado ainda não é conhecimento compartilhado.
+
 ## Ambiente do fusion_eval
 
 Globais já ligados: `adsk`, `app`, `ui`, `design`, `root`.
@@ -218,11 +267,104 @@ result = [{'name': b.name, 'volume_cm3': b.physicalProperties.volume}
           for b in root.bRepBodies]
 ```
 
+**`print()` não devolve nada.** O Fusion não tem console ligado ao bridge:
+a saída some e a chamada volta `null`. Para inspecionar vários valores,
+acumule numa lista e atribua a `result`:
+
+```python
+tab = []
+for D in (19, 20, 21):
+    tab.append({'D': D, 'area': ...})
+result = tab          # e não print(...) dentro do loop
+```
+
 ## Antes de modificar
 
-Operações destrutivas (deletar bodies, features, componentes) não têm undo pelo
-bridge. Confirme com o usuário antes. Para inspecionar primeiro, retorne a
-estrutura e só depois aplique a mudança.
+O bridge tem `undo()`: desfaz a última chamada que mexeu no modelo, apagando
+as entradas que ela criou no timeline. Um nível só. Uma chamada que levanta
+exceção é revertida sozinha, então `undo()` serve para retirar trabalho que
+deu certo mas saiu errado.
+
+```python
+result = undo()   # 'undone: 4 timeline entries removed, back to position 7'
+```
+
+O que `undo()` **não** cobre: só funciona em design paramétrico (direct
+modelling não tem timeline), e só enxerga o que passa pelo timeline —
+renomear body, trocar material ou mudar visibilidade continuam sem volta.
+Deletar bodies e componentes segue exigindo confirmação do usuário.
+
+Para voltar mais de um passo, o rollback é manual e destrutivo — apaga tudo
+depois da marca:
+
+```python
+import sys
+mod = sys.modules[next(n for n, m in sys.modules.items()
+                       if getattr(m, '__file__', None) and 'Claude MCP' in str(m.__file__))]
+mod._rollback_to(4)      # mantém as 4 primeiras entradas do timeline
+mod._checkpoint = None
+```
+
+Mover só o `markerPosition` **não** desfaz nada: suprime as features, que
+voltam se algo rolar para frente. Desfazer de verdade é `deleteObject()` em
+cada entrada, de trás para frente (`TimelineObject` não tem `deleteMe`).
+
+## Roscas
+
+As consultas de rosca são `all*`, não `getAll*` (`getAllSizes` não existe).
+A ordem é tipo → tamanho → designação → classe, e cada passo alimenta o
+seguinte:
+
+```python
+th = root.features.threadFeatures
+q  = th.threadDataQuery
+q.allThreadTypes                                  # 'ANSI Unified Screw Threads',
+                                                  # 'ANSI Metric M Profile', ...
+q.allSizes(tipo)                                  # '0.375'  (polegada, string)
+q.allDesignations(tipo, '0.375')                  # '3/8-24 UNF', '3/8-16 UNC', ...
+cls = list(q.allClasses(False, tipo, desig))[0]   # '1A'; False = rosca externa
+```
+
+`createThreadInfo` só aceita uma classe vinda de `allClasses` — nome
+inventado é rejeitado. E `isModeled = True` é o que gera filete de verdade;
+sem isso a rosca fica cosmética (aparece, mas não muda o volume).
+
+```python
+info = th.createThreadInfo(False, tipo, desig, cls)
+faces = adsk.core.ObjectCollection.create()
+faces.add(face_cilindrica)          # a face onde a rosca vai
+inp = th.createInput(faces, info)
+inp.isModeled = True
+th.add(inp)
+```
+
+Para achar a face certa, filtre por raio em vez de índice — a ordem das
+faces muda a cada feature:
+
+```python
+alvo = next(f for f in body.faces
+            if f.geometry.objectType == adsk.core.Cylinder.classType()
+            and abs(f.geometry.radius*10 - 4.765) < 0.05)   # Ø9.53 em mm
+```
+
+## Conferindo geometria sem screenshot
+
+`f.geometry.objectType` dá o tipo da superfície, e cada tipo expõe a cota
+que interessa: `Cylinder.radius`, `Sphere.radius`, `Cone.halfAngle` (em
+radianos). Listar isso confirma diâmetros e ângulos de projeto mais barato
+e mais preciso que olhar uma imagem:
+
+```python
+result = [{'tipo': f.geometry.objectType.split('::')[-1],
+           'raio_mm': round(f.geometry.radius*10, 3)}
+          for f in body.faces
+          if f.geometry.objectType == adsk.core.Cylinder.classType()]
+```
+
+Uma bounding box grande não significa geometria espelhada: um perfil
+revolvido em torno de um eixo que não passa pelo centro gera o corpo
+inteiro de uma vez. Confira `minPoint`/`maxPoint` separados antes de
+concluir que algo duplicou.
 
 ## Referências — consulte antes de chutar
 
