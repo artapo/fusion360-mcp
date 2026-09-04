@@ -1,0 +1,43 @@
+name: Publish to PyPI
+
+# Publishes when a release is created. Tagging alone does nothing, so a
+# mistagged commit can be deleted without a bad version reaching PyPI --
+# PyPI never lets a version be reused, even after deletion.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:        # lets you publish by hand from the Actions tab
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Build wheel and sdist
+        run: |
+          python -m pip install --upgrade build
+          python -m build
+      - name: Check metadata renders on PyPI
+        run: |
+          python -m pip install --upgrade twine
+          python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write       # required for Trusted Publishing; no API token stored
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
