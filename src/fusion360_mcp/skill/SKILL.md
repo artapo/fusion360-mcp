@@ -320,9 +320,16 @@ mod._checkpoint = None
 ```
 
 Moving `markerPosition` alone **does not** undo anything: it suppresses the
-features, which come back if something rolls forward. Real undo is
-`deleteObject()` on each entry, back to front (`TimelineObject` has no
-`deleteMe`).
+features, which come back if something rolls forward. Real undo is deleting
+each entry, back to front.
+
+**How you delete one depends on the version.** `TimelineObject.deleteObject()`
+(guarded by `isDeletable`) is the documented way, but neither exists before
+~2705 — on 2704.1.36 both are absent and every call raised `AttributeError:
+'TimelineObject' object has no attribute 'isDeletable'`. `entity.deleteMe()`
+works on both, since deleting the feature removes its timeline row. The
+bridge's `_delete_entry` tries the first and falls back to the second; write
+new code the same way rather than assuming either.
 
 ## Threads
 
@@ -380,6 +387,32 @@ A large bounding box does not mean mirrored geometry: a profile revolved
 around an axis that doesn't pass through the centre produces the whole body
 at once. Check `minPoint`/`maxPoint` separately before concluding something
 got duplicated.
+
+## api() — ask the object before guessing
+
+`api(obj)` lists what an object actually offers, with real signatures. One
+cheap call instead of a write-fail-read-traceback round trip:
+
+```python
+result = api(root.features.revolveFeatures)
+# createInput(profile: 'core.Base', axis: 'core.Base', operation: 'FeatureOperations')
+# props: count, isValid, objectType
+```
+
+Second argument filters by substring — use it on big classes:
+
+```python
+result = api(inp, 'extent')   # setOneSideExtent(extent, direction, taperAngle=None), ...
+```
+
+Takes an instance or a class. It reads the API **as installed**, which is the
+point: the online docs describe the newest version, and a method documented
+there may not exist in the running Fusion. `TimelineObject.deleteObject`
+is exactly that case — present in the docs, absent before ~2705. When docs
+and `api()` disagree, `api()` wins.
+
+Reach for it whenever you are about to guess a method name, and after any
+`AttributeError`.
 
 ## References — check before guessing
 

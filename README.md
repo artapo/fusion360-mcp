@@ -37,7 +37,12 @@ installer detects this and tells you rather than corrupting the copy.
 
 ## Requirements
 
-- Fusion 360 (Windows or macOS)
+- Fusion 360 (Windows or macOS), version **2704.1.36 or newer** — that is the
+  oldest build this was verified on. Older ones are untested, not known to be
+  broken. The API changes between versions: `TimelineObject.deleteObject`, for
+  instance, is missing before ~2705, so the bridge falls back to
+  `entity.deleteMe()` for undo and rollback. Check yours with
+  `result = app.version`.
 - Claude Code
 - Python 3.9+
 

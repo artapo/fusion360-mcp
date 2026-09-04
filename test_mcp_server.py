@@ -79,5 +79,39 @@ if live:
     assert call('result = snapshot()')['text'] == before, 'undo did not restore state'
     assert 'nothing to undo' in call('result = undo()')['text'], 'undo went too far'
 
+
+# api(): introspection over the installed stubs. Runs without Fusion open --
+# the stubs carry the same signatures the live objects do.
+STUBS = os.path.join(os.path.expanduser('~'), 'AppData', 'Roaming', 'Autodesk',
+                     'Autodesk Fusion 360', 'API', 'Python', 'defs')
+if os.path.isdir(STUBS):
+    import inspect, io, types, warnings
+    sys.path.insert(0, STUBS)
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')  # stub docstrings have bad escapes
+        import adsk.core, adsk.fusion
+
+    addin = io.open(os.path.join('src', 'fusion360_mcp', 'addin', 'Claude MCP.py'),
+                    encoding='utf-8').read()
+    mod = types.ModuleType('addin_api')
+    mod.inspect = inspect
+    exec(compile(addin[addin.index('def _api('):addin.index('# createInput(...) and similar')],
+                 'addin', 'exec'), mod.__dict__)
+
+    rev = mod._api(adsk.fusion.RevolveFeatures)
+    # The signature that costs a round trip to discover: 3 args, axis in the middle.
+    assert "createInput(profile: 'core.Base', axis: 'core.Base'" in rev, rev
+    assert 'props: count, isValid, objectType' in rev, rev
+    # self is dropped, but staticmethod args must survive it.
+    pt = mod._api(adsk.core.Point3D)
+    assert 'asArray()' in pt and '(self' not in pt, pt
+    assert "create(x: 'float' = 0.0" in pt, pt
+    assert 'setOneSideExtent' in mod._api(adsk.fusion.ExtrudeFeatureInput, 'extent')
+    assert 'nothing matched' in mod._api(adsk.fusion.RevolveFeatures, 'zzz')
+    stubs_ok = True
+else:
+    stubs_ok = False
+
 print('ok — protocol fine.',
-      'Fusion connected, image + undo ok.' if live else 'Fusion not running (expected if closed).')
+      'Fusion connected, image + undo ok.' if live else 'Fusion not running (expected if closed).',
+      'api() ok against stubs.' if stubs_ok else 'stubs absent, api() unchecked.')
