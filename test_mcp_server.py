@@ -20,6 +20,25 @@ assert len(lines) == 3, f'expected 3 replies (notification unanswered), got {len
 assert [l['id'] for l in lines] == [1, 2, 3], lines
 assert lines[0]['result']['serverInfo']['name'] == 'fusion360', lines[0]
 assert lines[1]['result']['tools'][0]['name'] == 'fusion_eval', lines[1]
-text = lines[2]['result']['content'][0]['text']
+block = lines[2]['result']['content'][0]
+assert block['type'] == 'text', block
+text = block['text']
 assert text == '1' or 'Cannot reach Fusion' in text, text
-print('ok — protocol fine.', 'Fusion connected.' if text == '1' else 'Fusion not running (expected if closed).')
+live = text == '1'
+
+# Image blocks must come back as MCP image content, not a JSON blob of base64.
+if live:
+    out = subprocess.run(
+        [sys.executable, 'mcp_server.py'],
+        input=json.dumps({'jsonrpc': '2.0', 'id': 4, 'method': 'tools/call',
+                          'params': {'name': 'fusion_eval',
+                                     'arguments': {'code': 'result = screenshot(200, 150)'}}}),
+        capture_output=True, text=True, timeout=90,
+    ).stdout
+    img = json.loads(out.splitlines()[0])['result']['content'][0]
+    assert img['type'] == 'image', img
+    assert img['mimeType'] == 'image/png', img
+    assert len(img['data']) > 100, 'empty image payload'
+
+print('ok — protocol fine.',
+      'Fusion connected, image block ok.' if live else 'Fusion not running (expected if closed).')

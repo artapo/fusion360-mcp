@@ -32,7 +32,16 @@ TOOL = {
         "(rootComponent). Assign to `result` to return a value; it must be "
         "JSON-serializable or it comes back as repr(). Runs on Fusion's main "
         "thread, so the API is fully usable. 60s timeout.\n\n"
-        "Example: result = [b.name for b in root.bRepBodies]"
+        "Example: result = [b.name for b in root.bRepBodies]\n\n"
+        "Also pre-bound:\n"
+        "- snapshot() -> compact text state of the design (bodies, volumes, "
+        "bounding boxes, params). Cheap; prefer it over a screenshot to check "
+        "your work.\n"
+        "- screenshot(width, height, view) -> renders the viewport and returns "
+        "the image inline. view is a ViewOrientations name like 'IsoTopRight' "
+        "or 'Front', or omit to keep the current camera. Costs ~10k tokens, "
+        "so use it when shape matters and snapshot() when numbers do.\n"
+        "  Assign either to `result`: result = snapshot()"
     ),
     'inputSchema': {
         'type': 'object',
@@ -44,7 +53,12 @@ TOOL = {
 }
 
 
-def call_fusion(code: str) -> str:
+def _text(msg: str) -> list:
+    return [{'type': 'text', 'text': msg}]
+
+
+def call_fusion(code: str) -> list:
+    """Run code in Fusion; return MCP content blocks (text, or an image)."""
     req = urllib.request.Request(
         FUSION_URL,
         data=json.dumps({'code': code}).encode(),
@@ -58,20 +72,30 @@ def call_fusion(code: str) -> str:
             payload = json.load(resp)
     except urllib.error.HTTPError as exc:
         if exc.code == 401:
-            return (
+            return _text(
                 'Unauthorized: token mismatch. The add-in creates '
                 f'{SECRET_FILE} on start; restart the Fusion add-in if the '
                 'file was deleted or changed.'
             )
-        return f'Fusion returned HTTP {exc.code}: {exc.reason}'
+        return _text(f'Fusion returned HTTP {exc.code}: {exc.reason}')
     except (urllib.error.URLError, OSError, http.client.HTTPException) as exc:
-        return (
+        return _text(
             f'Cannot reach Fusion 360 ({exc}). Is Fusion open with the '
             '"Claude MCP" add-in running? (Utilities > ADD-INS > Add-Ins)'
         )
     if not payload.get('ok'):
-        return f"Error in Fusion:\n{payload.get('error')}"
-    return json.dumps(payload.get('result'), indent=2, ensure_ascii=False)
+        return _text(f"Error in Fusion:\n{payload.get('error')}")
+
+    value = payload.get('result')
+    # screenshot() returns its PNG inline rather than as a path on disk.
+    if isinstance(value, dict) and value.get('mime') == 'image/png':
+        if not value.get('ok'):
+            return _text(f"Screenshot failed: {value.get('error')}")
+        return [{'type': 'image', 'data': value['image'], 'mimeType': 'image/png'}]
+    # snapshot() is already formatted text; don't re-quote it as a JSON string.
+    if isinstance(value, str):
+        return _text(value)
+    return _text(json.dumps(value, indent=2, ensure_ascii=False))
 
 
 def handle(req: dict):
@@ -87,9 +111,8 @@ def handle(req: dict):
     if method == 'tools/call':
         params = req.get('params', {})
         if params.get('name') != TOOL['name']:
-            return {'content': [{'type': 'text', 'text': 'Unknown tool'}], 'isError': True}
-        text = call_fusion(params.get('arguments', {}).get('code', ''))
-        return {'content': [{'type': 'text', 'text': text}]}
+            return {'content': _text('Unknown tool'), 'isError': True}
+        return {'content': call_fusion(params.get('arguments', {}).get('code', ''))}
     return None  # notifications (e.g. notifications/initialized) get no reply
 
 

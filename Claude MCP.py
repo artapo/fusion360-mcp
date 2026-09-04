@@ -16,11 +16,16 @@ Auth: requests must carry 'Authorization: Bearer <token>' matching
 arbitrary Python in this Fusion session.
 """
 
+import base64
+import collections
 import http.server
+import inspect
 import json
 import os
 import queue
+import re
 import secrets
+import tempfile
 import threading
 import time
 import traceback
@@ -90,6 +95,118 @@ class _ExecHandler(adsk.core.CustomEventHandler):
             job['done'].set()
 
 
+def _snapshot() -> str:
+    """Compact text state of the design. The cheap alternative to a screenshot.
+
+    ASCII only: mm3 not mm³. Identical bodies collapse into one line, so a
+    50-instance pattern costs the same as one body.
+    """
+    d = adsk.fusion.Design.cast(app.activeProduct)
+    if not d:
+        return 'no active design (Manufacture workspace?)'
+    r = d.rootComponent
+
+    groups = collections.OrderedDict()
+    for b in r.bRepBodies:
+        bb = b.boundingBox
+        key = (
+            round(b.physicalProperties.volume * 1000, 3),
+            round((bb.maxPoint.x - bb.minPoint.x) * 10, 3),
+            round((bb.maxPoint.y - bb.minPoint.y) * 10, 3),
+            round((bb.maxPoint.z - bb.minPoint.z) * 10, 3),
+            b.faces.count,
+            b.isVisible,
+        )
+        groups.setdefault(key, []).append(b.name)
+
+    parametric = d.designType == adsk.fusion.DesignTypes.ParametricDesignType
+    out = ['doc: %s  [%s]  sketches:%d  timeline:%s' % (
+        app.activeDocument.name,
+        d.unitsManager.defaultLengthUnits,
+        r.sketches.count,
+        d.timeline.count if parametric else 'direct',
+    )]
+
+    params = [p for p in d.userParameters]
+    if params:
+        out.append('params: ' + ', '.join(
+            '%s=%s' % (p.name, p.expression) for p in params[:12]))
+
+    out.append('bodies: %d' % r.bRepBodies.count)
+    for (vol, x, y, z, nf, vis), names in groups.items():
+        label = names[0] if len(names) == 1 else '%s x%d' % (names[0], len(names))
+        out.append('  %-26s %10.3f mm3  %gx%gx%g  faces:%d%s' % (
+            label, vol, x, y, z, nf, '' if vis else '  [hidden]'))
+
+    if not groups:
+        out.append('  (nenhum)')
+    return chr(10).join(out)
+
+
+def _screenshot(width=1000, height=750, view=None) -> dict:
+    """Viewport as base64 PNG, returned inline. No file left behind.
+
+    view: named ViewOrientations member (e.g. 'IsoTopRight', 'Front'), or
+    None to keep the current camera.
+    """
+    vp = app.activeViewport
+    if view:
+        orient = getattr(adsk.core.ViewOrientations, view + 'ViewOrientation', None)
+        if orient is None:
+            return {'ok': False, 'error': 'unknown view %r' % view}
+        cam = vp.camera
+        cam.viewOrientation = orient
+        cam.isFitView = True
+        vp.camera = cam
+    vp.refresh()
+
+    path = os.path.join(tempfile.gettempdir(), 'claude_fusion_shot.png')
+    if not vp.saveAsImageFile(path, width, height):
+        return {'ok': False, 'error': 'saveAsImageFile failed'}
+    try:
+        with open(path, 'rb') as fh:
+            data = base64.b64encode(fh.read()).decode('ascii')
+    finally:
+        try:
+            os.remove(path)  # ponytail: temp file is an implementation detail
+        except OSError:
+            pass
+    return {'ok': True, 'image': data, 'mime': 'image/png'}
+
+
+# createInput(...) and similar take different args per feature type; the
+# traceback alone doesn't say which. Pull the real signature from the stubs.
+def _signature_hint(exc: BaseException, scope: dict) -> str:
+    """On a TypeError/AttributeError, append the real signature if findable."""
+    msg = str(exc)
+    m = re.search(r'(\w+)\(\) (?:missing|takes)', msg)
+    if not m:
+        return ''
+    fname = m.group(1)
+    # Walk the last frame's locals/globals for an object exposing that method.
+    tb = exc.__traceback__
+    while tb and tb.tb_next:
+        tb = tb.tb_next
+    candidates = {}
+    if tb:
+        candidates.update(tb.tb_frame.f_locals)
+    candidates.update(scope)
+    for obj in list(candidates.values()):
+        fn = getattr(obj, fname, None)
+        if fn is None or not callable(fn):
+            continue
+        try:
+            sig = str(inspect.signature(fn))
+        except (TypeError, ValueError):
+            doc = (inspect.getdoc(fn) or '').strip().splitlines()
+            if not doc:
+                continue
+            sig = doc[0]
+        return ('\n\nHint: %s.%s%s'
+                % (type(obj).__name__, fname, sig))
+    return ''
+
+
 def _run_code(code: str) -> dict:
     """Exec user code with Fusion globals; return whatever it puts in `result`."""
     scope = {
@@ -99,10 +216,16 @@ def _run_code(code: str) -> dict:
         'design': adsk.fusion.Design.cast(app.activeProduct),
         'root': None,
         'result': None,
+        'snapshot': _snapshot,
+        'screenshot': _screenshot,
     }
     if scope['design']:
         scope['root'] = scope['design'].rootComponent
-    exec(code, scope)  # noqa: S102 - arbitrary execution is the whole point
+    try:
+        exec(code, scope)  # noqa: S102 - arbitrary execution is the whole point
+    except (TypeError, AttributeError) as exc:
+        return {'ok': False,
+                'error': traceback.format_exc() + _signature_hint(exc, scope)}
     value = scope.get('result')
     try:
         json.dumps(value)
@@ -143,7 +266,9 @@ class _Handler(http.server.BaseHTTPRequestHandler):
     def _reply(self, status, payload):
         body = json.dumps(payload).encode()
         self.send_response(status)
-        self.send_header('Content-Type', 'application/json')
+        # charset matters: without it accented output comes back as mojibake
+        # (mm3 -> mmÂ³) because the client falls back to latin-1.
+        self.send_header('Content-Type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(body)))
         self.end_headers()
         self.wfile.write(body)
