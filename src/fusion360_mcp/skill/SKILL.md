@@ -5,97 +5,100 @@ description: Use when writing code for the Fusion 360 API via the fusion_eval MC
 
 # Fusion 360 API
 
-Escrever código para `fusion_eval`. Tudo aqui foi verificado na documentação
-oficial da Autodesk (Fusion API User's Manual), não de memória.
+Writing code for `fusion_eval`. Everything here was verified against
+Autodesk's official docs (Fusion API User's Manual), not recalled from
+memory.
 
-## Este arquivo cresce com o uso — contribua
+## This file grows with use — contribute
 
-Se você é um agente trabalhando nesta base: **quando perder tempo com uma
-armadilha que não está aqui, documente antes de encerrar a tarefa.** Cada
-seção abaixo nasceu de um erro real que custou chamadas. Um método com nome
-diferente do esperado, uma assinatura que varia, uma operação que falha
-silenciosamente, um nome que muda com o idioma da UI — tudo isso vale uma
-entrada.
+If you are an agent working in this codebase: **when you lose time to a trap
+that isn't documented here, write it down before you finish the task.** Every
+section below came from a real mistake that cost calls. A method with a
+different name than expected, a signature that varies, an operation that
+fails silently, a name that changes with the UI language — all of it earns
+an entry.
 
-O critério é simples: *isso me faria errar de novo daqui a um mês?* Se sim,
-escreva. Se foi erro de raciocínio seu e não da API, provavelmente não vale
-uma seção — no máximo uma linha de aviso onde o assunto já é tratado.
+The test is simple: *would this make me get it wrong again a month from now?*
+If yes, write it. If it was your own reasoning error rather than an API trap,
+it probably doesn't deserve a section — at most a warning line where the
+topic is already covered.
 
-Regras para contribuir:
+Rules for contributing:
 
-- **Verifique antes de escrever.** Rode o caso pelo `fusion_eval` e cole o
-  comportamento real, não o que você supõe. Uma linha errada aqui custa mais
-  caro que uma ausente, porque será seguida sem checagem.
-- **Documente a mensagem de erro junto da correção.** Quem cair na mesma
-  armadilha vai buscar pelo texto do erro, não pelo nome do conceito.
-- **Prefira o exemplo mínimo** que roda ao parágrafo explicativo.
-- **Corrija o que envelheceu.** Se uma seção contradiz o comportamento atual,
-  atualizá-la vale mais que acrescentar uma nova — uma skill que descreve
-  errado a ferramenta é pior que uma incompleta.
-- **A fonte é `src/fusion360_mcp/skill/SKILL.md` no repo.** É ela que vai no
-  PR e é dela que o instalador copia. O arquivo em
-  `~/.claude/skills/fusion360-api/` é a cópia instalada, que carrega nas
-  suas sessões — editar só lá faz o trabalho se perder na próxima
-  instalação. Edite no repo e rode `fusion360-mcp install` para atualizar
-  a sua.
+- **Verify before you write.** Run the case through `fusion_eval` and paste
+  the real behaviour, not what you assume. A wrong line here costs more than
+  a missing one, because it will be followed without checking.
+- **Document the error message next to the fix.** Whoever hits the same trap
+  will search for the error text, not the name of the concept.
+- **Prefer the minimal example** that runs over the explanatory paragraph.
+- **Fix what went stale.** If a section contradicts current behaviour,
+  updating it is worth more than adding a new one — a skill that describes
+  the tool wrongly is worse than an incomplete one.
+- **The source is `src/fusion360_mcp/skill/SKILL.md` in the repo.** That's
+  what goes in the PR and what the installer copies from. The file at
+  `~/.claude/skills/fusion360-api/` is the installed copy that loads in your
+  sessions — editing only there loses the work on the next install. Edit in
+  the repo and run `fusion360-mcp install` to refresh yours.
 
-### Como enviar
+### How to submit
 
-Contribuição entra por **pull request** — ninguém commita direto na master.
-O mantenedor (@artapo) revisa e decide o que entra.
+Contributions come in as **pull requests** — nobody commits straight to
+master. The maintainer (@artapo) reviews and decides what lands.
 
-- Um PR por achado. Dois achados sem relação em branches separadas revisam
-  mais rápido e não travam um no outro.
-- No corpo do PR, diga **o que você estava fazendo quando bateu na
-  armadilha**. O contexto é metade do valor: separa o caso geral do
-  acidente de percurso.
-- Cole a saída real do `fusion_eval` que comprova o comportamento — a
-  chamada que falhou e a que funcionou. É o que permite revisar sem
-  reproduzir tudo de novo.
-- Se você corrigiu algo que estava escrito errado aqui, diga isso no título.
-  Correção tem prioridade de revisão sobre acréscimo.
+- One PR per finding. Two unrelated findings on separate branches review
+  faster and don't block each other.
+- In the PR body, say **what you were doing when you hit the trap**. Context
+  is half the value: it separates the general case from the one-off
+  accident.
+- Paste the actual `fusion_eval` output that proves the behaviour — the call
+  that failed and the one that worked. That's what lets a reviewer judge it
+  without reproducing everything.
+- If you fixed something that was written wrong here, say so in the title.
+  Corrections get review priority over additions.
 
-Não espere aprovação para abrir o PR: abra, com a verificação junto. Espere
-aprovação para considerar o assunto documentado — enquanto o PR estiver
-aberto, o achado ainda não é conhecimento compartilhado.
+Don't wait for approval to open the PR: open it, with the verification
+included. Do wait for approval before treating the matter as documented —
+while the PR is open, the finding isn't shared knowledge yet.
 
-## Ambiente do fusion_eval
+## The fusion_eval environment
 
-Globais já ligados: `adsk`, `app`, `ui`, `design`, `root`.
-Atribua a `result` para devolver valor — precisa ser JSON-serializável ou volta
-como `repr()`. Roda na main thread do Fusion, API 100% utilizável. Timeout 60s.
+Pre-bound globals: `adsk`, `app`, `ui`, `design`, `root`.
+Assign to `result` to return a value — it must be JSON-serializable or it
+comes back as `repr()`. Runs on Fusion's main thread, so the API is fully
+usable. 60s timeout.
 
 ```python
 result = [b.name for b in root.bRepBodies]
 ```
 
-`design` já é `adsk.fusion.Design.cast(app.activeProduct)` e `root` já é
-`design.rootComponent` — não refaça. Se o usuário estiver no workspace de
-Manufacture, `design` vem `None`; cheque antes de mexer em geometria.
+`design` is already `adsk.fusion.Design.cast(app.activeProduct)` and `root`
+is already `design.rootComponent` — don't redo it. If the user is in the
+Manufacture workspace, `design` comes back `None`; check before touching
+geometry.
 
-## Unidades — a fonte de bug nº 1
+## Units — bug source number one
 
-A API **sempre** usa unidades internas de banco de dados, independente do que o
-usuário configurou na UI:
+The API **always** uses internal database units, regardless of what the user
+configured in the UI:
 
 | Design | CAM |
 |---|---|
-| Comprimento: **cm** | Comprimento: cm |
-| Ângulo: **radianos** | Ângulo: **graus** |
-| Massa: kg | Tempo: s, Potência: W |
+| Length: **cm** | Length: cm |
+| Angle: **radians** | Angle: **degrees** |
+| Mass: kg | Time: s, Power: W |
 
-Design usa radianos, CAM usa graus. Não confunda.
+Design uses radians, CAM uses degrees. Don't mix them up.
 
-`5` numa chamada de API é **5 cm**, não 5 mm. Para 10 mm escreva `1.0`, ou
-melhor, deixe explícito:
+`5` in an API call is **5 cm**, not 5 mm. For 10 mm write `1.0`, or better,
+make it explicit:
 
 ```python
-mm = 0.1  # fator mm -> cm
+mm = 0.1  # mm -> cm factor
 dist = adsk.core.ValueInput.createByReal(10 * mm)
 ```
 
-Quando a entrada vem do usuário como string ("3 in", "1/2", "hole_depth / 2"),
-não parseie na mão — use o UnitsManager:
+When input comes from the user as a string ("3 in", "1/2", "hole_depth / 2"),
+don't parse it by hand — use the UnitsManager:
 
 ```python
 um = design.unitsManager
@@ -103,68 +106,72 @@ if um.isValidExpression(txt, um.defaultLengthUnits):
     cm = um.evaluateExpression(txt, um.defaultLengthUnits)
 ```
 
-Para exibir ao usuário, formate de volta com `um.formatInternalValue(...)`.
+To display back to the user, format with `um.formatInternalValue(...)`.
 
-`ValueInput.createByString('10 mm')` respeita unidade explícita e aceita
-expressões/parâmetros; `createByReal(1.0)` é sempre cm. Prefira `createByString`
-quando quiser que o valor vire uma expressão paramétrica no modelo.
+`ValueInput.createByString('10 mm')` respects the explicit unit and accepts
+expressions/parameters; `createByReal(1.0)` is always cm. Prefer
+`createByString` when you want the value to become a parametric expression
+in the model.
 
 ## Object model
 
 `Application` → `Documents` / `Document` → `Product` (→ `Design`) →
-`rootComponent` → sketches, features, bodies, construction geometry, occurrences.
+`rootComponent` → sketches, features, bodies, construction geometry,
+occurrences.
 
-Para achar algo, pergunte quem é o dono: uma SketchLine pertence a um Sketch,
-que pertence a um Component.
+To find something, ask who owns it: a SketchLine belongs to a Sketch, which
+belongs to a Component.
 
-Todo objeto tem: `objectType`, `classType()`, `isValid` (checa se ainda existe —
-uma referência guardada pode ser invalidada por uma operação posterior).
+Every object has: `objectType`, `classType()`, `isValid` (checks whether it
+still exists — a stored reference can be invalidated by a later operation).
 
-Objetos transientes usam funções estáticas: `adsk.core.ObjectCollection.create()`,
-`adsk.core.Point3D.create(x, y, z)`, `adsk.core.Matrix3D.create()`.
+Transient objects use static functions:
+`adsk.core.ObjectCollection.create()`, `adsk.core.Point3D.create(x, y, z)`,
+`adsk.core.Matrix3D.create()`.
 
 ## Components vs Occurrences
 
-- **Component** contém a geometria. Sempre em model space, não reposicionável.
-- **Occurrence** é uma instância do component. É o que aparece no browser e na
-  tela. Reposicionável e constrangível.
-- Só o root component existe sem occurrence.
+- **Component** holds the geometry. Always in model space, not
+  repositionable.
+- **Occurrence** is an instance of the component. It's what shows in the
+  browser and on screen. Repositionable and constrainable.
+- Only the root component exists without an occurrence.
 
-**Armadilha:** ao criar geometria pela API, o componente ativo da UI é
-**ignorado**. A geometria vai no componente de onde você chamou. Editar
-`Component1` requer pegar aquele component, não ativá-lo na UI.
+**Trap:** when creating geometry through the API, the UI's active component
+is **ignored**. Geometry goes into the component you called from. Editing
+`Component1` means grabbing that component, not activating it in the UI.
 
-Criar componente novo = criar occurrence:
+Creating a new component = creating an occurrence:
 
 ```python
 occ = root.occurrences.addNewComponent(adsk.core.Matrix3D.create())
 newComp = occ.component
 ```
 
-Editar um component afeta **todas** as suas occurrences.
+Editing a component affects **all** of its occurrences.
 
 ## Proxies
 
-Uma face dentro de `Component9` que aparece em duas occurrences é ambígua — o
-Fusion não sabe qual instância você quer. O proxy carrega o caminho completo
+A face inside `Component9` that appears in two occurrences is ambiguous —
+Fusion doesn't know which instance you mean. The proxy carries the full path
 (`Component9:1/RedFace`).
 
-- `assemblyContext` → occurrence de topo do caminho
-- `nativeObject` → a entidade real dentro do component
-- `createForAssemblyContext(occ)` → cria o proxy naquele contexto
+- `assemblyContext` → top occurrence of the path
+- `nativeObject` → the real entity inside the component
+- `createForAssemblyContext(occ)` → creates the proxy in that context
 
-Se uma chamada falhar reclamando de contexto num assembly, é proxy faltando.
-Em designs de um componente só (root), isso não aparece.
+If a call fails complaining about assembly context, a proxy is missing. In
+single-component (root) designs this never comes up.
 
-## Padrão Input Object
+## The Input Object pattern
 
-Features complexas seguem sempre: `createInput` → configurar → `add`. O input
-object é o equivalente ao diálogo do comando.
+Complex features always follow: `createInput` → configure → `add`. The input
+object is the equivalent of the command's dialog.
 
 ```python
 sk = root.sketches.add(root.xYConstructionPlane)
 sk.sketchCurves.sketchCircles.addByCenterRadius(
-    adsk.core.Point3D.create(0, 0, 0), 2.0)   # raio 2 cm
+    adsk.core.Point3D.create(0, 0, 0), 2.0)   # radius 2 cm
 
 prof = sk.profiles.item(0)
 ext = root.features.extrudeFeatures
@@ -174,222 +181,228 @@ result = ext.add(inp).name
 ```
 
 `FeatureOperations`: `NewBodyFeatureOperation`, `JoinFeatureOperation`,
-`CutFeatureOperation`, `IntersectFeatureOperation`, `NewComponentFeatureOperation`.
+`CutFeatureOperation`, `IntersectFeatureOperation`,
+`NewComponentFeatureOperation`.
 
-**A assinatura de `createInput` varia por feature.** Não assuma que é sempre
-`(profile, operation)`. `RevolveFeatures` pede o eixo no meio:
+**The signature of `createInput` varies per feature.** Don't assume it's
+always `(profile, operation)`. `RevolveFeatures` wants the axis in the
+middle:
 
 ```python
-inp = rev.createInput(profile, axis, operation)   # 3 args, verificado
+inp = rev.createInput(profile, axis, operation)   # 3 args, verified
 ```
 
-Se vier `TypeError: createInput() missing 1 required positional argument`,
-é isso — confira a assinatura nos stubs locais em `API/Python/defs/adsk/`
-antes de tentar variações.
+If you get `TypeError: createInput() missing 1 required positional
+argument`, that's this — check the signature in the local stubs at
+`API/Python/defs/adsk/` before trying variations.
 
-Collections têm `add*` variados — `sketchArcs` tem `addByThreePoints`,
-`addByCenterStartSweep`, `addFillet`. Procure o add certo antes de improvisar.
+Collections have assorted `add*` methods — `sketchArcs` has
+`addByThreePoints`, `addByCenterStartSweep`, `addFillet`. Look for the right
+one before improvising.
 
-## Python: as pegadinhas
+## Python: the gotchas
 
-**Out-args viram tupla.** `Point3D.getData(out x, out y, out z)` em Python:
+**Out-args become tuples.** `Point3D.getData(out x, out y, out z)` in Python:
 
 ```python
 (retVal, x, y, z) = point.getData()
 ```
 
-**Igualdade:** use `==`, **nunca** `is`. Objetos Fusion são wrappers; `is`
-compara o wrapper, não a entidade.
+**Equality:** use `==`, **never** `is`. Fusion objects are wrappers; `is`
+compares the wrapper, not the entity.
 
 ```python
-if face1 == face2:  # correto
+if face1 == face2:  # correct
 ```
 
-**Tipos:** `type()` só dá o tipo exato. Para hierarquia use `isinstance`:
+**Types:** `type()` only gives the exact type. For hierarchy use
+`isinstance`:
 
 ```python
-isinstance(sel, adsk.fusion.SketchEntity)  # pega SketchLine, SketchArc, etc.
+isinstance(sel, adsk.fusion.SketchEntity)  # catches SketchLine, SketchArc, etc.
 ```
 
-`cast()` retorna `None` quando o tipo não bate — é a forma idiomática de
-validar seleção:
+`cast()` returns `None` when the type doesn't match — it's the idiomatic way
+to validate a selection:
 
 ```python
 edge = adsk.fusion.BRepEdge.cast(sels[0].entity)
 if not edge:
-    result = 'não é uma aresta'
+    result = 'not an edge'
 ```
 
-**Collections** iteram como container Python: `for x in col`, `len(col)`,
-`col[0]`, `col[-1]`, `col[1:4]`. Não precisa de `range(col.count)`.
+**Collections** iterate like Python containers: `for x in col`, `len(col)`,
+`col[0]`, `col[-1]`, `col[1:4]`. No need for `range(col.count)`.
 
-**Arrays retornados são "vector", não list.** Iteram, mas não têm `append`.
-Converta: `list(sk.explode())`.
+**Returned arrays are "vector", not list.** They iterate, but have no
+`append`. Convert: `list(sk.explode())`.
 
-## Timeline e parâmetros
+## Timeline and parameters
 
 ```python
-design.timeline.markerPosition          # posição atual
-design.userParameters.itemByName('d1')  # parâmetro por nome
-param.expression = '25 mm'              # respeita unidade da string
-param.value                             # sempre em cm
+design.timeline.markerPosition          # current position
+design.userParameters.itemByName('d1')  # parameter by name
+param.expression = '25 mm'              # respects the string's unit
+param.value                             # always in cm
 ```
 
-Em designs paramétricos cada feature entra na timeline. `DirectDesignType` não
-tem timeline — cheque `design.designType` se for mexer nela.
+In parametric designs every feature enters the timeline. `DirectDesignType`
+has no timeline — check `design.designType` before touching it.
 
-## Materiais
+## Materials
 
-Material de biblioteca **não** pode ser atribuído direto a um body — dá
-`RuntimeError: 3 : invalid parameter value`. Copie para o design primeiro:
+A library material **cannot** be assigned straight to a body — it raises
+`RuntimeError: 3 : invalid parameter value`. Copy it into the design first:
 
 ```python
 lib   = app.materialLibraries.itemByName('Biblioteca de materiais do Fusion')
 src   = next(m for m in lib.materials if 'inox' in m.name.lower())
-steel = design.materials.addByCopy(src, src.name)   # obrigatório
+steel = design.materials.addByCopy(src, src.name)   # required
 body.material = steel
 ```
 
-**Os nomes das bibliotecas e materiais seguem o idioma da UI.** Nesta
-instalação é português: `'Biblioteca de materiais do Fusion'`, `'Aço
-inoxidável'`, `'Alumínio'` — `itemByName('Fusion Material Library')` volta
-`None`. Não hardcode nome em inglês; filtre por substring minúscula
+**Library and material names follow the UI language.** On this install they
+are Portuguese: `'Biblioteca de materiais do Fusion'`, `'Aço inoxidável'`,
+`'Alumínio'` — `itemByName('Fusion Material Library')` returns `None`. Don't
+hardcode English names; filter by lowercase substring
 (`'inox' in m.name.lower()`).
 
-Cuidado com acento: `m.name.startswith('Aço')` falhou por normalização
-Unicode mesmo com o nome batendo na listagem. Compare por substring sem
-acento (`'inox'`, `'alum'`) em vez do prefixo acentuado.
+Watch out for accents: `m.name.startswith('Aço')` failed due to Unicode
+normalization even though the name matched in the listing. Compare by
+accent-free substring (`'inox'`, `'alum'`) rather than the accented prefix.
 
-## Retornando dados
+## Returning data
 
-Objetos Fusion não são JSON-serializáveis. Extraia primitivos:
+Fusion objects are not JSON-serializable. Extract primitives:
 
 ```python
 result = [{'name': b.name, 'volume_cm3': b.physicalProperties.volume}
           for b in root.bRepBodies]
 ```
 
-**`print()` não devolve nada.** O Fusion não tem console ligado ao bridge:
-a saída some e a chamada volta `null`. Para inspecionar vários valores,
-acumule numa lista e atribua a `result`:
+**`print()` returns nothing.** Fusion has no console wired to the bridge:
+the output vanishes and the call comes back `null`. To inspect several
+values, accumulate into a list and assign it to `result`:
 
 ```python
 tab = []
 for D in (19, 20, 21):
     tab.append({'D': D, 'area': ...})
-result = tab          # e não print(...) dentro do loop
+result = tab          # not print(...) inside the loop
 ```
 
-## Antes de modificar
+## Before modifying
 
-O bridge tem `undo()`: desfaz a última chamada que mexeu no modelo, apagando
-as entradas que ela criou no timeline. Um nível só. Uma chamada que levanta
-exceção é revertida sozinha, então `undo()` serve para retirar trabalho que
-deu certo mas saiu errado.
+The bridge has `undo()`: it reverts the last call that touched the model,
+deleting the timeline entries it created. One level only. A call that raises
+is rolled back automatically, so `undo()` is for taking back work that
+succeeded but came out wrong.
 
 ```python
 result = undo()   # 'undone: 4 timeline entries removed, back to position 7'
 ```
 
-O que `undo()` **não** cobre: só funciona em design paramétrico (direct
-modelling não tem timeline), e só enxerga o que passa pelo timeline —
-renomear body, trocar material ou mudar visibilidade continuam sem volta.
-Deletar bodies e componentes segue exigindo confirmação do usuário.
+What `undo()` does **not** cover: it only works in parametric designs
+(direct modelling has no timeline), and it only sees what goes through the
+timeline — renaming a body, changing material or toggling visibility have no
+way back. Deleting bodies and components still needs the user's
+confirmation.
 
-Para voltar mais de um passo, o rollback é manual e destrutivo — apaga tudo
-depois da marca:
+To go back more than one step, the rollback is manual and destructive — it
+wipes everything after the mark:
 
 ```python
 import sys
 mod = sys.modules[next(n for n, m in sys.modules.items()
                        if getattr(m, '__file__', None) and 'Claude MCP' in str(m.__file__))]
-mod._rollback_to(4)      # mantém as 4 primeiras entradas do timeline
+mod._rollback_to(4)      # keeps the first 4 timeline entries
 mod._checkpoint = None
 ```
 
-Mover só o `markerPosition` **não** desfaz nada: suprime as features, que
-voltam se algo rolar para frente. Desfazer de verdade é `deleteObject()` em
-cada entrada, de trás para frente (`TimelineObject` não tem `deleteMe`).
+Moving `markerPosition` alone **does not** undo anything: it suppresses the
+features, which come back if something rolls forward. Real undo is
+`deleteObject()` on each entry, back to front (`TimelineObject` has no
+`deleteMe`).
 
-## Roscas
+## Threads
 
-As consultas de rosca são `all*`, não `getAll*` (`getAllSizes` não existe).
-A ordem é tipo → tamanho → designação → classe, e cada passo alimenta o
-seguinte:
+Thread queries are `all*`, not `getAll*` (`getAllSizes` does not exist). The
+order is type → size → designation → class, and each step feeds the next:
 
 ```python
 th = root.features.threadFeatures
 q  = th.threadDataQuery
 q.allThreadTypes                                  # 'ANSI Unified Screw Threads',
                                                   # 'ANSI Metric M Profile', ...
-q.allSizes(tipo)                                  # '0.375'  (polegada, string)
-q.allDesignations(tipo, '0.375')                  # '3/8-24 UNF', '3/8-16 UNC', ...
-cls = list(q.allClasses(False, tipo, desig))[0]   # '1A'; False = rosca externa
+q.allSizes(type)                                  # '0.375'  (inch, string)
+q.allDesignations(type, '0.375')                  # '3/8-24 UNF', '3/8-16 UNC', ...
+cls = list(q.allClasses(False, type, desig))[0]   # '1A'; False = external thread
 ```
 
-`createThreadInfo` só aceita uma classe vinda de `allClasses` — nome
-inventado é rejeitado. E `isModeled = True` é o que gera filete de verdade;
-sem isso a rosca fica cosmética (aparece, mas não muda o volume).
+`createThreadInfo` only accepts a class that came from `allClasses` — an
+invented name is rejected. And `isModeled = True` is what produces real
+thread geometry; without it the thread is cosmetic (it shows, but the volume
+doesn't change).
 
 ```python
-info = th.createThreadInfo(False, tipo, desig, cls)
+info = th.createThreadInfo(False, type, desig, cls)
 faces = adsk.core.ObjectCollection.create()
-faces.add(face_cilindrica)          # a face onde a rosca vai
+faces.add(cylindrical_face)          # the face the thread goes on
 inp = th.createInput(faces, info)
 inp.isModeled = True
 th.add(inp)
 ```
 
-Para achar a face certa, filtre por raio em vez de índice — a ordem das
-faces muda a cada feature:
+To find the right face, filter by radius rather than index — face order
+changes with every feature:
 
 ```python
-alvo = next(f for f in body.faces
-            if f.geometry.objectType == adsk.core.Cylinder.classType()
-            and abs(f.geometry.radius*10 - 4.765) < 0.05)   # Ø9.53 em mm
+target = next(f for f in body.faces
+              if f.geometry.objectType == adsk.core.Cylinder.classType()
+              and abs(f.geometry.radius*10 - 4.765) < 0.05)   # Ø9.53 in mm
 ```
 
-## Conferindo geometria sem screenshot
+## Checking geometry without a screenshot
 
-`f.geometry.objectType` dá o tipo da superfície, e cada tipo expõe a cota
-que interessa: `Cylinder.radius`, `Sphere.radius`, `Cone.halfAngle` (em
-radianos). Listar isso confirma diâmetros e ângulos de projeto mais barato
-e mais preciso que olhar uma imagem:
+`f.geometry.objectType` gives the surface type, and each type exposes the
+dimension that matters: `Cylinder.radius`, `Sphere.radius`, `Cone.halfAngle`
+(in radians). Listing that confirms design diameters and angles more cheaply
+and more precisely than looking at an image:
 
 ```python
-result = [{'tipo': f.geometry.objectType.split('::')[-1],
-           'raio_mm': round(f.geometry.radius*10, 3)}
+result = [{'type': f.geometry.objectType.split('::')[-1],
+           'radius_mm': round(f.geometry.radius*10, 3)}
           for f in body.faces
           if f.geometry.objectType == adsk.core.Cylinder.classType()]
 ```
 
-Uma bounding box grande não significa geometria espelhada: um perfil
-revolvido em torno de um eixo que não passa pelo centro gera o corpo
-inteiro de uma vez. Confira `minPoint`/`maxPoint` separados antes de
-concluir que algo duplicou.
+A large bounding box does not mean mirrored geometry: a profile revolved
+around an axis that doesn't pass through the centre produces the whole body
+at once. Check `minPoint`/`maxPoint` separately before concluding something
+got duplicated.
 
-## Referências — consulte antes de chutar
+## References — check before guessing
 
-Este arquivo cobre o essencial. Para o resto da API, use `references/`:
+This file covers the essentials. For the rest of the API, use `references/`:
 
-- **`references/api-index.md`** — 1832 classes/enums com a URL oficial de cada
-  uma. Faça grep para descobrir se algo existe e como se chama, depois abra a
-  URL com WebFetch para a assinatura e o exemplo.
+- **`references/api-index.md`** — 1832 classes/enums with the official URL
+  for each. Grep it to find out whether something exists and what it's
+  called, then open the URL with WebFetch for the signature and example.
 
       grep -i "revolvefeature" references/api-index.md
 
-- **`references/guides.md`** — 9 guias do User's Manual: BRep, Design Intent,
-  Events, Attributes, Selection Filters, Custom Graphics, Commands, Command
-  Inputs, Threading.
+- **`references/guides.md`** — 9 guides from the User's Manual: BRep, Design
+  Intent, Events, Attributes, Selection Filters, Custom Graphics, Commands,
+  Command Inputs, Threading.
 
       sed -n '/^## Attributes/,/^---/p' references/guides.md
 
-- **`references/README.md`** — qual dos dois usar para quê.
+- **`references/README.md`** — which of the two to use for what.
 
-Não invente nomes de método. Se não achou no índice, o método provavelmente não
-existe com esse nome — procure o conceito relacionado.
+Don't invent method names. If you didn't find it in the index, the method
+probably doesn't exist under that name — look for the related concept.
 
-Fontes externas: [User's Manual](https://help.autodesk.com/view/fusion360/ENU/?guid=GUID-C1545D80-D804-4CF3-886D-9B5C54B2D7A2),
-[PDF do object model](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/ExtraFiles/Fusion.pdf),
-e os stubs locais em `API/Python/defs/adsk/` (assinaturas exatas da versão
-instalada — a fonte mais precisa se a docs online divergir).
+External sources: [User's Manual](https://help.autodesk.com/view/fusion360/ENU/?guid=GUID-C1545D80-D804-4CF3-886D-9B5C54B2D7A2),
+[object model PDF](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/ExtraFiles/Fusion.pdf),
+and the local stubs at `API/Python/defs/adsk/` (exact signatures for the
+installed version — the most accurate source when the online docs disagree).

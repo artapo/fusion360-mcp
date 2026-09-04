@@ -1,97 +1,99 @@
 # fusion360-mcp
 
-Deixa o Claude Code controlar o Fusion 360: executa Python dentro da sessão
-aberta, com a API completa disponível — criar geometria, ler dimensões,
-percorrer o timeline.
+Lets Claude Code drive Fusion 360: runs Python inside the live session with
+the full API available — build geometry, read dimensions, walk the timeline.
+
+*[Leia em português](README.pt-BR.md)*
 
 ```python
 result = snapshot()
-# doc: rolamento.f3d  [mm]  sketches:7  timeline:16
+# doc: bearing.f3d  [mm]  sketches:7  timeline:16
 # bodies: 11
-#   anel_externo_flangeado   173.978 mm3  17x17x4.6  faces:10
-#   esfera x7                  2.572 mm3  1.7x1.7x1.7  faces:1
+#   outer_ring_flanged       173.978 mm3  17x17x4.6  faces:10
+#   ball x7                    2.572 mm3  1.7x1.7x1.7  faces:1
 ```
 
-## Instalação
+## Install
 
 ```bash
 uvx fusion360-mcp install
 ```
 
-Instala as três partes: o add-in dentro do Fusion, a skill `fusion360-api`
-em `~/.claude/skills/` e a entrada MCP no Claude Code.
+Installs all three pieces: the add-in inside Fusion, the `fusion360-api`
+skill in `~/.claude/skills/`, and the MCP entry in Claude Code.
 
-Depois, no Fusion: **Utilities → ADD-INS → Add-Ins**, selecione
-"Claude MCP" e clique **Run**. Marque *Run on Startup* para não repetir.
-O add-in precisa estar rodando para o bridge responder.
+Then in Fusion: **Utilities → ADD-INS → Add-Ins**, select "Claude MCP" and
+press **Run**. Tick *Run on Startup* to skip this next time. The add-in has
+to be running for the bridge to answer.
 
 ```bash
-uvx fusion360-mcp status      # o que está instalado onde
-uvx fusion360-mcp uninstall   # remove tudo
+uvx fusion360-mcp status      # what is installed where
+uvx fusion360-mcp uninstall   # take it back out
 ```
 
-Feche o Fusion antes de instalar: ele mantém os arquivos do add-in abertos.
-O instalador detecta e avisa.
+Close Fusion before installing — it holds the add-in files open. The
+installer detects this and tells you rather than corrupting the copy.
 
-## Requisitos
+## Requirements
 
-- Fusion 360 (Windows ou macOS)
+- Fusion 360 (Windows or macOS)
 - Claude Code
 - Python 3.9+
 
-Sem dependências de runtime — o servidor MCP fala JSON-RPC só com a stdlib.
+No runtime dependencies: the MCP server speaks JSON-RPC using only the
+standard library.
 
-## Como funciona
+## How it works
 
-O Fusion só aceita chamadas de API na thread principal. O add-in sobe um
-servidor HTTP numa thread de fundo e despacha cada requisição por
-`CustomEvent`; a thread HTTP bloqueia até a principal devolver o resultado.
+Fusion only accepts API calls on its main thread. The add-in runs an HTTP
+server on a background thread and hands each request to the main thread via
+a `CustomEvent`; the HTTP thread blocks until the result comes back.
 
 ```
 Claude Code  --stdio-->  server.py  --HTTP:8766-->  add-in  -->  Fusion
 ```
 
-Autenticação por token em `~/.claude-fusion-secret`, criado no primeiro
-uso. Sem ele qualquer processo local executaria Python na sua sessão.
+Requests carry a bearer token from `~/.claude-fusion-secret`, created on
+first run. Without it any local process could execute Python in your Fusion
+session.
 
-## A ferramenta
+## The tool
 
-`fusion_eval` recebe código Python e devolve o que estiver em `result`.
-Já vêm ligados `adsk`, `app`, `ui`, `design`, `root` e mais três ajudas:
+`fusion_eval` takes Python source and returns whatever you assign to
+`result`. `adsk`, `app`, `ui`, `design` and `root` are pre-bound, plus three
+helpers:
 
 | | |
 |---|---|
-| `snapshot()` | Estado do modelo em texto compacto. Corpos idênticos colapsam numa linha — um padrão de 50 furos custa o mesmo que um. |
-| `screenshot(w, h, view)` | Renderiza o viewport e devolve a imagem. Caro (~10k tokens); prefira `snapshot()` quando o que importa são números. |
-| `undo()` | Desfaz a última chamada que mexeu no modelo. Um nível. Chamada que falha é revertida sozinha. |
+| `snapshot()` | Model state as compact text. Identical bodies collapse into one line, so a 50-instance pattern costs the same as one body. |
+| `screenshot(w, h, view)` | Renders the viewport and returns the image inline. Expensive (~10k tokens) — prefer `snapshot()` when numbers are what matter. |
+| `undo()` | Reverts the last call that changed the model. One level. A call that raises is rolled back automatically. |
 
-## A skill
+## The skill
 
-O pacote instala junto a skill `fusion360-api`, que documenta as armadilhas
-da API — unidades internas em cm e radianos, assinaturas que variam por
-feature, nomes de material que seguem o idioma da UI. Cada seção nasceu de
-um erro real.
+The package also installs the `fusion360-api` skill, which documents the
+API's traps — internal units in cm and radians, signatures that vary per
+feature, material names that follow the UI language. Every section came from
+a real mistake.
 
-Ela pede contribuição: se você bater numa armadilha que não está lá,
-documente. O arquivo é `src/fusion360_mcp/skill/SKILL.md` e as regras estão
-no topo dele.
+It asks for contributions: if you hit a trap that isn't there, document it.
+The file is `src/fusion360_mcp/skill/SKILL.md` and the rules are at the top.
 
-## Contribuindo
+## Contributing
 
-Pull requests são bem-vindos. Abra um PR por achado, com a saída do
-`fusion_eval` que comprova o comportamento — a chamada que falhou e a que
-funcionou.
+Pull requests welcome. One PR per finding, with the `fusion_eval` output
+that proves the behaviour — the call that failed and the one that worked.
 
 ```bash
 git clone https://github.com/artapo/fusion360-mcp
 cd fusion360-mcp
-python test_mcp_server.py    # passa com o Fusion aberto ou fechado
+python test_mcp_server.py    # passes whether Fusion is open or closed
 ```
 
-## Licença
+## License
 
-[Apache 2.0](LICENSE) — permissiva como a MIT, e com concessão explícita de
-patentes, que protege quem usa e quem contribui.
+[Apache 2.0](LICENSE) — as permissive as MIT, plus an explicit patent grant
+that protects both users and contributors.
 
-Fusion 360 é marca da Autodesk, Inc. Este projeto não é afiliado à Autodesk
-nem endossado por ela.
+Fusion 360 is a trademark of Autodesk, Inc. This project is not affiliated
+with or endorsed by Autodesk.
