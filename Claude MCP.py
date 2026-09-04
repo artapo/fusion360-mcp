@@ -207,8 +207,58 @@ def _signature_hint(exc: BaseException, scope: dict) -> str:
     return ''
 
 
+# Timeline position captured before the last call that changed anything.
+# None means there is nothing to undo (read-only call, or already undone).
+_checkpoint = None
+
+
+def _timeline():
+    """The active parametric timeline, or None (direct modelling has none)."""
+    d = adsk.fusion.Design.cast(app.activeProduct)
+    if not d or d.designType != adsk.fusion.DesignTypes.ParametricDesignType:
+        return None
+    return d.timeline
+
+
+def _rollback_to(mark: int) -> int:
+    """Delete every timeline entry after `mark`. Returns how many went.
+
+    Moving the marker alone only suppresses features -- they stay in the
+    timeline and come back if anything rolls forward. Deleting is what
+    actually undoes the work.
+    """
+    tl = _timeline()
+    if tl is None:
+        return 0
+    removed = 0
+    for i in range(tl.count - 1, mark - 1, -1):
+        entry = tl.item(i)
+        if entry.isDeletable:
+            entry.deleteObject()
+            removed += 1
+    tl.markerPosition = tl.count  # leave the marker at the end, not mid-history
+    return removed
+
+
+def _undo() -> str:
+    """Undo the last state-changing fusion_eval call. The Ctrl+Z of the bridge."""
+    global _checkpoint  # noqa: PLW0603
+    if _checkpoint is None:
+        return 'nothing to undo (last call changed nothing, or already undone)'
+    tl = _timeline()
+    if tl is None:
+        return 'no parametric timeline: direct-modelling designs cannot roll back'
+    target = _checkpoint
+    _checkpoint = None  # ponytail: single level, matching one saved checkpoint
+    removed = _rollback_to(target)
+    return 'undone: %d timeline entr%s removed, back to position %d' % (
+        removed, 'y' if removed == 1 else 'ies', target)
+
+
 def _run_code(code: str) -> dict:
     """Exec user code with Fusion globals; return whatever it puts in `result`."""
+    global _checkpoint  # noqa: PLW0603
+
     scope = {
         'adsk': adsk,
         'app': app,
@@ -218,14 +268,42 @@ def _run_code(code: str) -> dict:
         'result': None,
         'snapshot': _snapshot,
         'screenshot': _screenshot,
+        'undo': _undo,
     }
     if scope['design']:
         scope['root'] = scope['design'].rootComponent
+
+    # Checkpoint on count, not markerPosition: the marker can sit behind the
+    # end (user rolled back in the UI), and comparing against it would either
+    # miss new features or delete ones that were already there.
+    tl = _timeline()
+    mark = tl.count if tl else None
+
     try:
         exec(code, scope)  # noqa: S102 - arbitrary execution is the whole point
-    except (TypeError, AttributeError) as exc:
-        return {'ok': False,
-                'error': traceback.format_exc() + _signature_hint(exc, scope)}
+    except BaseException as exc:  # noqa: BLE001 - report everything back
+        # Roll back whatever the failed call managed to create, so a crash
+        # halfway through never leaves half-built geometry behind.
+        undone = 0
+        if mark is not None and tl.count > mark:
+            try:
+                undone = _rollback_to(mark)
+            except Exception:  # noqa: BLE001 - rollback is best-effort
+                _trace('rollback failed: ' + traceback.format_exc())
+        _checkpoint = None
+        err = traceback.format_exc()
+        if isinstance(exc, (TypeError, AttributeError)):
+            err += _signature_hint(exc, scope)
+        if undone:
+            err += ('\n\nRolled back %d timeline entr%s created before the error.'
+                    % (undone, 'y' if undone == 1 else 'ies'))
+        return {'ok': False, 'error': err}
+
+    # Only remember a checkpoint when the call actually built something;
+    # undo() after a read-only call would otherwise clobber earlier work.
+    if mark is not None and tl.count > mark:
+        _checkpoint = mark
+
     value = scope.get('result')
     try:
         json.dumps(value)

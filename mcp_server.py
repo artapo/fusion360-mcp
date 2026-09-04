@@ -41,7 +41,10 @@ TOOL = {
         "the image inline. view is a ViewOrientations name like 'IsoTopRight' "
         "or 'Front', or omit to keep the current camera. Costs ~10k tokens, "
         "so use it when shape matters and snapshot() when numbers do.\n"
-        "  Assign either to `result`: result = snapshot()"
+        "- undo() -> reverts the last call that changed the model, deleting the "
+        "timeline entries it added. One level deep. A call that raises is rolled "
+        "back automatically, so undo() is for taking back work that succeeded.\n"
+        "  Assign any of them to `result`: result = snapshot()"
     ),
     'inputSchema': {
         'type': 'object',

@@ -40,5 +40,42 @@ if live:
     assert img['mimeType'] == 'image/png', img
     assert len(img['data']) > 100, 'empty image payload'
 
+def call(code, _id=[10]):
+    """Run one code string through the server, return the first content block."""
+    _id[0] += 1
+    out = subprocess.run(
+        [sys.executable, 'mcp_server.py'],
+        input=json.dumps({'jsonrpc': '2.0', 'id': _id[0], 'method': 'tools/call',
+                          'params': {'name': 'fusion_eval', 'arguments': {'code': code}}}),
+        capture_output=True, text=True, timeout=90,
+    ).stdout
+    return json.loads(out.splitlines()[0])['result']['content'][0]
+
+# undo(): a failed call rolls itself back, and a good call is undoable once.
+if live:
+    before = call('result = snapshot()')['text']
+
+    build = ("import adsk.core, adsk.fusion\n"
+             "sk = root.sketches.add(root.xYConstructionPlane)\n"
+             "sk.sketchCurves.sketchCircles.addByCenterRadius("
+             "adsk.core.Point3D.create(0,0,0), 1.0)\n"
+             "ext = root.features.extrudeFeatures\n"
+             "inp = ext.createInput(sk.profiles.item(0),"
+             " adsk.fusion.FeatureOperations.NewBodyFeatureOperation)\n"
+             "inp.setDistanceExtent(False, adsk.core.ValueInput.createByReal(0.5))\n"
+             "ext.add(inp).bodies.item(0).name = %r\n")
+
+    # A call that raises after building must leave nothing behind.
+    crashed = call(build % 'TEST_CRASH' + "raise RuntimeError('boom')")['text']
+    assert 'Rolled back' in crashed, crashed
+    assert call('result = snapshot()')['text'] == before, 'crash left geometry behind'
+
+    # A call that succeeds is undoable, exactly once.
+    call(build % 'TEST_UNDO')
+    assert call('result = snapshot()')['text'] != before, 'build did nothing'
+    assert 'undone' in call('result = undo()')['text']
+    assert call('result = snapshot()')['text'] == before, 'undo did not restore state'
+    assert 'nothing to undo' in call('result = undo()')['text'], 'undo went too far'
+
 print('ok — protocol fine.',
-      'Fusion connected, image block ok.' if live else 'Fusion not running (expected if closed).')
+      'Fusion connected, image + undo ok.' if live else 'Fusion not running (expected if closed).')
