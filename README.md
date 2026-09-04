@@ -4,6 +4,7 @@ Lets Claude Code drive Fusion 360: runs Python inside the live session with
 the full API available — build geometry, read dimensions, walk the timeline.
 
 *[Leia em português](README.pt-BR.md)*
+[![Buy Me A Coffee](https://img.shields.io/badge/Buy%20Me%20A%20Coffee-support-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/artapo)
 
 ```python
 result = snapshot()
