@@ -32,6 +32,9 @@ jobs:
   publish:
     needs: build
     runs-on: ubuntu-latest
+    # Set "Required reviewers" on this environment (Settings > Environments >
+    # pypi) so a publish waits for a human. Private repos on the Free plan
+    # reject that rule with a 422; public repos get it at no cost.
     environment: pypi
     permissions:
       id-token: write       # required for Trusted Publishing; no API token stored
