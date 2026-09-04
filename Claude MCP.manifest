@@ -1,0 +1,13 @@
+{
+    "autodeskProduct": "Fusion",
+    "type": "addin",
+    "author": "Claude",
+    "description": {
+        "": "MCP to Claude Code"
+    },
+    "version": "",
+    "supportedOS": "windows|mac",
+    "editEnabled": true,
+    "iconFilename": "ScriptIcon.svg",
+    "runOnStartup": false
+}
