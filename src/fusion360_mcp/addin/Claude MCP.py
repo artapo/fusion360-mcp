@@ -174,6 +174,51 @@ def _screenshot(width=1000, height=750, view=None) -> dict:
     return {'ok': True, 'image': data, 'mime': 'image/png'}
 
 
+def _api(obj, grep=None) -> str:
+    """List what `obj` actually offers: methods with signatures, properties.
+
+    The cure for guessing method names. The stubs carry full typed
+    signatures (createInput(profile, axis, operation) -> RevolveFeatureInput),
+    so one cheap call replaces a write-fail-read-traceback round trip.
+
+    obj may be an instance or a class; grep filters by substring.
+    """
+    cls = obj if inspect.isclass(obj) else type(obj)
+    methods, props = [], []
+    for name in dir(cls):
+        if name.startswith('_'):
+            continue
+        if grep and grep.lower() not in name.lower():
+            continue
+        try:
+            attr = getattr(cls, name)
+        except Exception:  # noqa: BLE001 - some descriptors raise off-instance
+            continue
+        if isinstance(attr, property):
+            props.append(name)
+        elif callable(attr):
+            try:
+                params = list(inspect.signature(attr).parameters.values())
+                if params and params[0].name == 'self':  # keep staticmethod args
+                    params = params[1:]
+                sig = '(%s)' % ', '.join(str(p) for p in params)
+            except (TypeError, ValueError, IndexError):
+                sig = '(?)'
+            methods.append(name + sig)
+        else:
+            props.append(name)
+
+    out = [cls.__name__ + (' (filter: %s)' % grep if grep else '')]
+    if methods:
+        out.append('methods:')
+        out += ['  ' + m for m in methods]
+    if props:
+        out.append('props: ' + ', '.join(props))
+    if not methods and not props:
+        out.append('  (nothing matched)')
+    return chr(10).join(out)
+
+
 # createInput(...) and similar take different args per feature type; the
 # traceback alone doesn't say which. Pull the real signature from the stubs.
 def _signature_hint(exc: BaseException, scope: dict) -> str:
@@ -220,6 +265,24 @@ def _timeline():
     return d.timeline
 
 
+def _delete_entry(entry) -> bool:
+    """Delete one timeline entry, on old and new Fusion alike.
+
+    TimelineObject.isDeletable/deleteObject only exist from a certain version
+    on (absent in 2704.1.36); deleting entry.entity removes the feature and
+    its timeline row either way. Without the fallback the whole rollback
+    raised AttributeError and was swallowed as best-effort, so a failed call
+    silently kept its geometry.
+    """
+    if getattr(entry, 'isDeletable', False) and hasattr(entry, 'deleteObject'):
+        entry.deleteObject()
+        return True
+    ent = getattr(entry, 'entity', None)
+    if ent is not None and hasattr(ent, 'deleteMe'):
+        return bool(ent.deleteMe())
+    return False
+
+
 def _rollback_to(mark: int) -> int:
     """Delete every timeline entry after `mark`. Returns how many went.
 
@@ -232,9 +295,7 @@ def _rollback_to(mark: int) -> int:
         return 0
     removed = 0
     for i in range(tl.count - 1, mark - 1, -1):
-        entry = tl.item(i)
-        if entry.isDeletable:
-            entry.deleteObject()
+        if _delete_entry(tl.item(i)):
             removed += 1
     tl.markerPosition = tl.count  # leave the marker at the end, not mid-history
     return removed
@@ -269,6 +330,7 @@ def _run_code(code: str) -> dict:
         'snapshot': _snapshot,
         'screenshot': _screenshot,
         'undo': _undo,
+        'api': _api,
     }
     if scope['design']:
         scope['root'] = scope['design'].rootComponent
@@ -285,11 +347,17 @@ def _run_code(code: str) -> dict:
         # Roll back whatever the failed call managed to create, so a crash
         # halfway through never leaves half-built geometry behind.
         undone = 0
+        rollback_err = ''
         if mark is not None and tl.count > mark:
             try:
                 undone = _rollback_to(mark)
             except Exception:  # noqa: BLE001 - rollback is best-effort
                 _trace('rollback failed: ' + traceback.format_exc())
+                rollback_err = traceback.format_exc().strip().splitlines()[-1]
+            # Report a silent no-op too: geometry surviving the error is
+            # something the caller must know before trying again.
+            if tl.count > mark and not rollback_err:
+                rollback_err = 'no entry could be deleted'
         _checkpoint = None
         err = traceback.format_exc()
         if isinstance(exc, (TypeError, AttributeError)):
@@ -297,6 +365,10 @@ def _run_code(code: str) -> dict:
         if undone:
             err += ('\n\nRolled back %d timeline entr%s created before the error.'
                     % (undone, 'y' if undone == 1 else 'ies'))
+        if rollback_err:
+            err += ('\n\nWARNING: rollback failed (%s) -- geometry from this '
+                    'call is still in the model. Clean it up before retrying.'
+                    % rollback_err)
         return {'ok': False, 'error': err}
 
     # Only remember a checkpoint when the call actually built something;
