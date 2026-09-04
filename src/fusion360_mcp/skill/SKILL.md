@@ -32,10 +32,12 @@ Regras para contribuir:
 - **Corrija o que envelheceu.** Se uma seção contradiz o comportamento atual,
   atualizá-la vale mais que acrescentar uma nova — uma skill que descreve
   errado a ferramenta é pior que uma incompleta.
-- **Este arquivo existe em duas cópias:** `~/.claude/skills/fusion360-api/`
-  (a que carrega nas sessões) e `.claude/skills/fusion360-api/` no repo.
-  Elas já divergiram. A cópia do repo é a que vai no PR; sincronize a local
-  com ela para não trabalhar em cima de uma versão velha.
+- **A fonte é `src/fusion360_mcp/skill/SKILL.md` no repo.** É ela que vai no
+  PR e é dela que o instalador copia. O arquivo em
+  `~/.claude/skills/fusion360-api/` é a cópia instalada, que carrega nas
+  suas sessões — editar só lá faz o trabalho se perder na próxima
+  instalação. Edite no repo e rode `fusion360-mcp install` para atualizar
+  a sua.
 
 ### Como enviar
 

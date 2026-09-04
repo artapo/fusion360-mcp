@@ -1,5 +1,7 @@
 """Minimal protocol check: python test_mcp_server.py"""
-import json, subprocess, sys
+import json, os, subprocess, sys
+
+SERVER = os.path.join('src', 'fusion360_mcp', 'server.py')
 
 REQS = [
     {'jsonrpc': '2.0', 'id': 1, 'method': 'initialize', 'params': {}},
@@ -10,7 +12,7 @@ REQS = [
 ]
 
 out = subprocess.run(
-    [sys.executable, 'mcp_server.py'],
+    [sys.executable, SERVER],
     input='\n'.join(json.dumps(r) for r in REQS),
     capture_output=True, text=True, timeout=90,
 ).stdout
@@ -29,7 +31,7 @@ live = text == '1'
 # Image blocks must come back as MCP image content, not a JSON blob of base64.
 if live:
     out = subprocess.run(
-        [sys.executable, 'mcp_server.py'],
+        [sys.executable, SERVER],
         input=json.dumps({'jsonrpc': '2.0', 'id': 4, 'method': 'tools/call',
                           'params': {'name': 'fusion_eval',
                                      'arguments': {'code': 'result = screenshot(200, 150)'}}}),
@@ -44,7 +46,7 @@ def call(code, _id=[10]):
     """Run one code string through the server, return the first content block."""
     _id[0] += 1
     out = subprocess.run(
-        [sys.executable, 'mcp_server.py'],
+        [sys.executable, SERVER],
         input=json.dumps({'jsonrpc': '2.0', 'id': _id[0], 'method': 'tools/call',
                           'params': {'name': 'fusion_eval', 'arguments': {'code': code}}}),
         capture_output=True, text=True, timeout=90,

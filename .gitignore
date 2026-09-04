@@ -11,3 +11,8 @@ __pycache__/
 
 # Log de trace do add-in (gerado em runtime)
 bridge_trace.log
+
+# Build
+dist/
+build/
+*.egg-info/
