@@ -1,0 +1,13 @@
+# Ambiente local (caminhos e hash de build da máquina)
+.env
+.vscode/
+
+# Lixo de sessão do playwright-mcp
+.playwright-mcp/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Log de trace do add-in (gerado em runtime)
+bridge_trace.log
