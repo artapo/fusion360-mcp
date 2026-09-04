@@ -76,19 +76,50 @@ API's traps — internal units in cm and radians, signatures that vary per
 feature, material names that follow the UI language. Every section came from
 a real mistake.
 
-It asks for contributions: if you hit a trap that isn't there, document it.
-The file is `src/fusion360_mcp/skill/SKILL.md` and the rules are at the top.
+The skill is the part that compounds. Code gets written once; the traps keep
+being discovered, and each one someone writes down is a trap nobody after
+them loses an hour to.
 
-## Contributing
+## Found a trap? Send it back
 
-Pull requests welcome. One PR per finding, with the `fusion_eval` output
-that proves the behaviour — the call that failed and the one that worked.
+**If the API surprised you, that's worth a PR.** A method whose real name
+differs from the obvious one, a signature that changes per feature, an
+operation that fails silently, a value that only works in one unit — that is
+exactly what belongs in the skill, and it's the kind of thing no
+documentation lists because it only shows up in practice.
+
+The bar is low on purpose. You don't need to fix anything or write well:
+
+- **Two calls are enough** — the one that failed and the one that worked.
+  Paste the real `fusion_eval` output, including the error message; that's
+  what someone will search for when they hit the same wall.
+- **Say what you were building.** Context separates a general trap from a
+  one-off accident, and it's usually the difference between a note that
+  helps and one that confuses.
+- **One PR per finding.** Unrelated findings on separate branches review
+  faster and don't block each other.
+- **Corrections beat additions.** If something in the skill is wrong or went
+  stale, saying so is more valuable than a new section — a skill that
+  describes the tool wrongly is worse than an incomplete one. Put it in the
+  title and it gets reviewed first.
+
+The file is `src/fusion360_mcp/skill/SKILL.md`; the full rules are at the
+top of it. It's written in English so contributors anywhere can maintain it.
+
+Not sure it's worth reporting? Open the PR anyway. Deciding is the
+maintainer's job, and an unreported trap costs the next person the same hour
+it cost you.
+
+## Contributing code
 
 ```bash
 git clone https://github.com/artapo/fusion360-mcp
 cd fusion360-mcp
 python test_mcp_server.py    # passes whether Fusion is open or closed
 ```
+
+The test runs without Fusion installed — it accepts either a live answer or
+"Cannot reach Fusion". CI runs it on Linux, macOS and Windows.
 
 ## License
 

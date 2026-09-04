@@ -75,22 +75,52 @@ da API — unidades internas em cm e radianos, assinaturas que variam por
 feature, nomes de material que seguem o idioma da UI. Cada seção nasceu de
 um erro real.
 
-Ela pede contribuição: se você bater numa armadilha que não está lá,
-documente. O arquivo é `src/fusion360_mcp/skill/SKILL.md` e as regras estão
-no topo dele. **A skill é escrita em inglês**, para que contribuidores de
-fora consigam mantê-la.
+A skill é a parte que acumula. Código se escreve uma vez; as armadilhas
+continuam sendo descobertas, e cada uma que alguém anota é uma armadilha que
+ninguém depois perde uma hora com ela.
 
-## Contribuindo
+## Achou uma armadilha? Mande de volta
 
-Pull requests são bem-vindos. Abra um PR por achado, com a saída do
-`fusion_eval` que comprova o comportamento — a chamada que falhou e a que
-funcionou.
+**Se a API te surpreendeu, isso vale um PR.** Um método cujo nome real é
+diferente do óbvio, uma assinatura que muda conforme a feature, uma operação
+que falha em silêncio, um valor que só funciona numa unidade — é exatamente
+o que pertence à skill, e é o tipo de coisa que documentação nenhuma lista,
+porque só aparece na prática.
+
+A régua é baixa de propósito. Você não precisa consertar nada nem escrever
+bonito:
+
+- **Duas chamadas bastam** — a que falhou e a que funcionou. Cole a saída
+  real do `fusion_eval`, com a mensagem de erro; é por ela que alguém vai
+  procurar ao bater na mesma parede.
+- **Diga o que você estava construindo.** O contexto separa a armadilha
+  geral do acidente isolado, e costuma ser a diferença entre uma nota que
+  ajuda e uma que confunde.
+- **Um PR por achado.** Achados sem relação em branches separadas revisam
+  mais rápido e não travam um no outro.
+- **Correção vale mais que acréscimo.** Se algo na skill está errado ou
+  envelheceu, apontar isso vale mais que uma seção nova — uma skill que
+  descreve a ferramenta errado é pior que uma incompleta. Diga no título e
+  ela é revisada primeiro.
+
+O arquivo é `src/fusion360_mcp/skill/SKILL.md`; as regras completas estão no
+topo dele. **A skill é escrita em inglês**, para que contribuidores de
+qualquer lugar consigam mantê-la.
+
+Na dúvida se vale reportar? Abra o PR assim mesmo. Decidir é trabalho do
+mantenedor, e uma armadilha não reportada custa à próxima pessoa a mesma
+hora que custou a você.
+
+## Contribuindo com código
 
 ```bash
 git clone https://github.com/artapo/fusion360-mcp
 cd fusion360-mcp
 python test_mcp_server.py    # passa com o Fusion aberto ou fechado
 ```
+
+O teste roda sem o Fusion instalado — aceita tanto a resposta real quanto
+"Cannot reach Fusion". O CI roda em Linux, macOS e Windows.
 
 ## Licença
 
