@@ -268,7 +268,7 @@ A library material **cannot** be assigned straight to a body — it raises
 `RuntimeError: 3 : invalid parameter value`. Copy it into the design first:
 
 ```python
-lib   = app.materialLibraries.itemByName('Biblioteca de materiais do Fusion')
+lib   = next(l for l in app.materialLibraries if 'materiais' in l.name.lower())
 src   = next(m for m in lib.materials if 'inox' in m.name.lower())
 steel = design.materials.addByCopy(src, src.name)   # required
 body.material = steel
@@ -283,6 +283,39 @@ hardcode English names; filter by lowercase substring
 Watch out for accents: `m.name.startswith('Aço')` failed due to Unicode
 normalization even though the name matched in the listing. Compare by
 accent-free substring (`'inox'`, `'alum'`) rather than the accented prefix.
+
+**`itemByName` is subject to the same normalization** — it is a string
+compare like any other. `app.materialLibraries.itemByName('Biblioteca de
+aparência do Fusion')` returns `None` even though a library by exactly that
+name is in the listing, and the failure surfaces one line later as
+`AttributeError: 'NoneType' object has no attribute 'appearances'`. Iterate
+and match on an unaccented substring instead:
+
+```python
+lib = next(l for l in app.materialLibraries if 'apar' in l.name.lower())
+```
+
+Same trap, second form: `next(m for m in lib.materials if m.name ==
+'Alumínio')` raises `StopIteration` — and since `next()` without a default
+raises before the assignment to `result`, the traceback points at the
+generator, not at the name. Give `next()` a default when you are probing,
+or match by substring.
+
+**Appearance is not material.** `body.material` drives physical properties;
+what you see is `body.appearance`, from a separate library (`'apar'` above)
+via `design.appearances.addByCopy(...)`. Setting only the material leaves
+the body rendered in the material's default look:
+
+```python
+lib = next(l for l in app.materialLibraries if 'apar' in l.name.lower())
+src = next(a for a in lib.appearances if a.name == 'Pintura - Metalizada (Preto)')
+body.appearance = design.appearances.addByCopy(src, 'Preto')
+```
+
+Appearance can also be set per face (`face.appearance`), which overrides the
+body's. Editing an upstream sketch reassigns face indices, so per-face
+appearance lands on the wrong faces after a rebuild — reapply it, or keep it
+at body level.
 
 ## Returning data
 
