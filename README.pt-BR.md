@@ -40,7 +40,12 @@ a cópia.
 
 ## Requisitos
 
-- Fusion 360 (Windows ou macOS)
+- Fusion 360 (Windows ou macOS), versão **2704.1.36 ou mais nova** — é a mais
+  antiga em que foi verificado. Anteriores não foram testadas, o que não
+  significa que não funcionem. A API muda entre versões: o
+  `TimelineObject.deleteObject`, por exemplo, não existe antes da ~2705, então
+  a ponte usa `entity.deleteMe()` no undo e no rollback. Veja a sua com
+  `result = app.version`.
 - Claude Code
 - Python 3.9+
 

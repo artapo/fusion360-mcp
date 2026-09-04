@@ -140,6 +140,17 @@ def _snapshot() -> str:
 
     if not groups:
         out.append('  (nenhum)')
+
+    # What the timeline holds, by type. These are the entries undo() removes,
+    # so seeing them saves a reconnaissance call before rolling anything back.
+    if parametric and d.timeline.count:
+        kinds = collections.OrderedDict()
+        for i in range(d.timeline.count):
+            ent = d.timeline.item(i).entity
+            name = type(ent).__name__ if ent else 'unknown'
+            kinds[name] = kinds.get(name, 0) + 1
+        out.append('timeline: ' + ', '.join(
+            '%dx%s' % (n, k) if n > 1 else k for k, n in kinds.items()))
     return chr(10).join(out)
 
 
@@ -172,6 +183,51 @@ def _screenshot(width=1000, height=750, view=None) -> dict:
         except OSError:
             pass
     return {'ok': True, 'image': data, 'mime': 'image/png'}
+
+
+def _api(obj, grep=None) -> str:
+    """List what `obj` actually offers: methods with signatures, properties.
+
+    The cure for guessing method names. The stubs carry full typed
+    signatures (createInput(profile, axis, operation) -> RevolveFeatureInput),
+    so one cheap call replaces a write-fail-read-traceback round trip.
+
+    obj may be an instance or a class; grep filters by substring.
+    """
+    cls = obj if inspect.isclass(obj) else type(obj)
+    methods, props = [], []
+    for name in dir(cls):
+        if name.startswith('_'):
+            continue
+        if grep and grep.lower() not in name.lower():
+            continue
+        try:
+            attr = getattr(cls, name)
+        except Exception:  # noqa: BLE001 - some descriptors raise off-instance
+            continue
+        if isinstance(attr, property):
+            props.append(name)
+        elif callable(attr):
+            try:
+                params = list(inspect.signature(attr).parameters.values())
+                if params and params[0].name == 'self':  # keep staticmethod args
+                    params = params[1:]
+                sig = '(%s)' % ', '.join(str(p) for p in params)
+            except (TypeError, ValueError, IndexError):
+                sig = '(?)'
+            methods.append(name + sig)
+        else:
+            props.append(name)
+
+    out = [cls.__name__ + (' (filter: %s)' % grep if grep else '')]
+    if methods:
+        out.append('methods:')
+        out += ['  ' + m for m in methods]
+    if props:
+        out.append('props: ' + ', '.join(props))
+    if not methods and not props:
+        out.append('  (nothing matched)')
+    return chr(10).join(out)
 
 
 # createInput(...) and similar take different args per feature type; the
@@ -220,6 +276,24 @@ def _timeline():
     return d.timeline
 
 
+def _delete_entry(entry) -> bool:
+    """Delete one timeline entry, on old and new Fusion alike.
+
+    TimelineObject.isDeletable/deleteObject only exist from a certain version
+    on (absent in 2704.1.36); deleting entry.entity removes the feature and
+    its timeline row either way. Without the fallback the whole rollback
+    raised AttributeError and was swallowed as best-effort, so a failed call
+    silently kept its geometry.
+    """
+    if getattr(entry, 'isDeletable', False) and hasattr(entry, 'deleteObject'):
+        entry.deleteObject()
+        return True
+    ent = getattr(entry, 'entity', None)
+    if ent is not None and hasattr(ent, 'deleteMe'):
+        return bool(ent.deleteMe())
+    return False
+
+
 def _rollback_to(mark: int) -> int:
     """Delete every timeline entry after `mark`. Returns how many went.
 
@@ -232,9 +306,7 @@ def _rollback_to(mark: int) -> int:
         return 0
     removed = 0
     for i in range(tl.count - 1, mark - 1, -1):
-        entry = tl.item(i)
-        if entry.isDeletable:
-            entry.deleteObject()
+        if _delete_entry(tl.item(i)):
             removed += 1
     tl.markerPosition = tl.count  # leave the marker at the end, not mid-history
     return removed
@@ -255,6 +327,19 @@ def _undo() -> str:
         removed, 'y' if removed == 1 else 'ies', target)
 
 
+def _delta(mark, tl, bodies_before, root) -> str:
+    """One line on what the call changed in the model, or '' if nothing did."""
+    bits = []
+    if mark is not None and tl.count != mark:
+        bits.append('timeline %d->%d' % (mark, tl.count))
+    if root:
+        now = root.bRepBodies.count
+        if now != bodies_before:
+            diff = now - bodies_before
+            bits.append('%+d %s' % (diff, 'body' if abs(diff) == 1 else 'bodies'))
+    return ', '.join(bits)
+
+
 def _run_code(code: str) -> dict:
     """Exec user code with Fusion globals; return whatever it puts in `result`."""
     global _checkpoint  # noqa: PLW0603
@@ -269,6 +354,7 @@ def _run_code(code: str) -> dict:
         'snapshot': _snapshot,
         'screenshot': _screenshot,
         'undo': _undo,
+        'api': _api,
     }
     if scope['design']:
         scope['root'] = scope['design'].rootComponent
@@ -277,7 +363,11 @@ def _run_code(code: str) -> dict:
     # end (user rolled back in the UI), and comparing against it would either
     # miss new features or delete ones that were already there.
     tl = _timeline()
-    mark = tl.count if tl else None
+    # `if tl is None`, never `if tl`: Timeline implements __len__, so an empty
+    # one is falsy and `tl.count if tl else None` silently disabled rollback
+    # and undo() in every fresh document -- the exact case a first model hits.
+    mark = tl.count if tl is not None else None
+    bodies_before = scope['root'].bRepBodies.count if scope['root'] else 0
 
     try:
         exec(code, scope)  # noqa: S102 - arbitrary execution is the whole point
@@ -285,11 +375,17 @@ def _run_code(code: str) -> dict:
         # Roll back whatever the failed call managed to create, so a crash
         # halfway through never leaves half-built geometry behind.
         undone = 0
+        rollback_err = ''
         if mark is not None and tl.count > mark:
             try:
                 undone = _rollback_to(mark)
             except Exception:  # noqa: BLE001 - rollback is best-effort
                 _trace('rollback failed: ' + traceback.format_exc())
+                rollback_err = traceback.format_exc().strip().splitlines()[-1]
+            # Report a silent no-op too: geometry surviving the error is
+            # something the caller must know before trying again.
+            if tl.count > mark and not rollback_err:
+                rollback_err = 'no entry could be deleted'
         _checkpoint = None
         err = traceback.format_exc()
         if isinstance(exc, (TypeError, AttributeError)):
@@ -297,6 +393,10 @@ def _run_code(code: str) -> dict:
         if undone:
             err += ('\n\nRolled back %d timeline entr%s created before the error.'
                     % (undone, 'y' if undone == 1 else 'ies'))
+        if rollback_err:
+            err += ('\n\nWARNING: rollback failed (%s) -- geometry from this '
+                    'call is still in the model. Clean it up before retrying.'
+                    % rollback_err)
         return {'ok': False, 'error': err}
 
     # Only remember a checkpoint when the call actually built something;
@@ -309,6 +409,13 @@ def _run_code(code: str) -> dict:
         json.dumps(value)
     except (TypeError, ValueError):
         value = repr(value)
+
+    # Report what the call did to the model. A build that returns nothing
+    # otherwise comes back as null, and the caller spends a snapshot() just
+    # to find out whether it worked.
+    changed = _delta(mark, tl, bodies_before, scope['root'])
+    if changed:
+        return {'ok': True, 'result': value, 'changed': changed}
     return {'ok': True, 'result': value}
 
 

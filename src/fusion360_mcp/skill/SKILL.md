@@ -76,6 +76,19 @@ is already `design.rootComponent` — don't redo it. If the user is in the
 Manufacture workspace, `design` comes back `None`; check before touching
 geometry.
 
+Also pre-bound: `snapshot()`, `screenshot()`, `api()`, `undo()`.
+
+**A call that changes the model says so.** The reply carries a delta line, so
+you don't need a `snapshot()` just to confirm a build worked:
+
+```
+null
+[timeline 3->5, +1 body]
+```
+
+No line means nothing changed — which is itself the answer when you expected
+a build to happen.
+
 ## Units — bug source number one
 
 The API **always** uses internal database units, regardless of what the user
@@ -255,7 +268,7 @@ A library material **cannot** be assigned straight to a body — it raises
 `RuntimeError: 3 : invalid parameter value`. Copy it into the design first:
 
 ```python
-lib   = app.materialLibraries.itemByName('Biblioteca de materiais do Fusion')
+lib   = next(l for l in app.materialLibraries if 'materiais' in l.name.lower())
 src   = next(m for m in lib.materials if 'inox' in m.name.lower())
 steel = design.materials.addByCopy(src, src.name)   # required
 body.material = steel
@@ -270,6 +283,39 @@ hardcode English names; filter by lowercase substring
 Watch out for accents: `m.name.startswith('Aço')` failed due to Unicode
 normalization even though the name matched in the listing. Compare by
 accent-free substring (`'inox'`, `'alum'`) rather than the accented prefix.
+
+**`itemByName` is subject to the same normalization** — it is a string
+compare like any other. `app.materialLibraries.itemByName('Biblioteca de
+aparência do Fusion')` returns `None` even though a library by exactly that
+name is in the listing, and the failure surfaces one line later as
+`AttributeError: 'NoneType' object has no attribute 'appearances'`. Iterate
+and match on an unaccented substring instead:
+
+```python
+lib = next(l for l in app.materialLibraries if 'apar' in l.name.lower())
+```
+
+Same trap, second form: `next(m for m in lib.materials if m.name ==
+'Alumínio')` raises `StopIteration` — and since `next()` without a default
+raises before the assignment to `result`, the traceback points at the
+generator, not at the name. Give `next()` a default when you are probing,
+or match by substring.
+
+**Appearance is not material.** `body.material` drives physical properties;
+what you see is `body.appearance`, from a separate library (`'apar'` above)
+via `design.appearances.addByCopy(...)`. Setting only the material leaves
+the body rendered in the material's default look:
+
+```python
+lib = next(l for l in app.materialLibraries if 'apar' in l.name.lower())
+src = next(a for a in lib.appearances if a.name == 'Pintura - Metalizada (Preto)')
+body.appearance = design.appearances.addByCopy(src, 'Preto')
+```
+
+Appearance can also be set per face (`face.appearance`), which overrides the
+body's. Editing an upstream sketch reassigns face indices, so per-face
+appearance lands on the wrong faces after a rebuild — reapply it, or keep it
+at body level.
 
 ## Returning data
 
@@ -320,9 +366,16 @@ mod._checkpoint = None
 ```
 
 Moving `markerPosition` alone **does not** undo anything: it suppresses the
-features, which come back if something rolls forward. Real undo is
-`deleteObject()` on each entry, back to front (`TimelineObject` has no
-`deleteMe`).
+features, which come back if something rolls forward. Real undo is deleting
+each entry, back to front.
+
+**How you delete one depends on the version.** `TimelineObject.deleteObject()`
+(guarded by `isDeletable`) is the documented way, but neither exists before
+~2705 — on 2704.1.36 both are absent and every call raised `AttributeError:
+'TimelineObject' object has no attribute 'isDeletable'`. `entity.deleteMe()`
+works on both, since deleting the feature removes its timeline row. The
+bridge's `_delete_entry` tries the first and falls back to the second; write
+new code the same way rather than assuming either.
 
 ## Threads
 
@@ -381,26 +434,63 @@ around an axis that doesn't pass through the centre produces the whole body
 at once. Check `minPoint`/`maxPoint` separately before concluding something
 got duplicated.
 
-## References — check before guessing
+## api() — ask the object before guessing
 
-This file covers the essentials. For the rest of the API, use `references/`:
+`api(obj)` lists what an object actually offers, with real signatures. One
+cheap call instead of a write-fail-read-traceback round trip:
 
-- **`references/api-index.md`** — 1832 classes/enums with the official URL
-  for each. Grep it to find out whether something exists and what it's
-  called, then open the URL with WebFetch for the signature and example.
+```python
+result = api(root.features.revolveFeatures)
+# createInput(profile: 'core.Base', axis: 'core.Base', operation: 'FeatureOperations')
+# props: count, isValid, objectType
+```
 
-      grep -i "revolvefeature" references/api-index.md
+Second argument filters by substring — use it on big classes:
+
+```python
+result = api(inp, 'extent')   # setOneSideExtent(extent, direction, taperAngle=None), ...
+```
+
+Takes an instance or a class. It reads the API **as installed**, which is the
+point: the online docs describe the newest version, and a method documented
+there may not exist in the running Fusion. `TimelineObject.deleteObject`
+is exactly that case — present in the docs, absent before ~2705. When docs
+and `api()` disagree, `api()` wins.
+
+Reach for it whenever you are about to guess a method name, and after any
+`AttributeError`.
+
+## Finding a class you don't have an object for
+
+`api()` needs an object or a class. To find out whether something exists at
+all, grep the installed stubs — they are the API as this Fusion actually has
+it, which the online docs are not:
+
+    # Windows
+    grep -n "^class Revolve" ~/AppData/Roaming/Autodesk/Autodesk\ Fusion\ 360/API/Python/defs/adsk/fusion.py
+    # macOS
+    grep -n "^class Revolve" ~/Library/Application\ Support/Autodesk/Autodesk\ Fusion\ 360/API/Python/defs/adsk/fusion.py
+
+`core.py` and `fusion.py` hold almost everything; `cam.py`, `drawing.py`,
+`sim.py` cover the other workspaces. Once you have the class,
+`api(adsk.fusion.RevolveFeatures)` gives the signatures.
+
+Don't invent method names. If a grep over the stubs doesn't find it, it
+doesn't exist under that name — look for the related concept.
+
+## References
 
 - **`references/guides.md`** — 9 guides from the User's Manual: BRep, Design
   Intent, Events, Attributes, Selection Filters, Custom Graphics, Commands,
-  Command Inputs, Threading.
+  Command Inputs, Threading. Concepts the stubs don't explain.
 
       sed -n '/^## Attributes/,/^---/p' references/guides.md
 
-- **`references/README.md`** — which of the two to use for what.
-
-Don't invent method names. If you didn't find it in the index, the method
-probably doesn't exist under that name — look for the related concept.
+- **`references/api-index.md`** — 1106 classes with their doc URLs. Superseded
+  by `api()` and the stubs for everyday use, and it describes the *newest*
+  Fusion, which may not be yours — the versioned `deleteObject` trap above
+  came from trusting it. Kept for when you want the prose documentation of a
+  class and its examples: grep the name, open the URL with WebFetch.
 
 External sources: [User's Manual](https://help.autodesk.com/view/fusion360/ENU/?guid=GUID-C1545D80-D804-4CF3-886D-9B5C54B2D7A2),
 [object model PDF](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/ExtraFiles/Fusion.pdf),
