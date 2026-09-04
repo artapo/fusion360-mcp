@@ -193,6 +193,23 @@ inp.setDistanceExtent(False, adsk.core.ValueInput.createByReal(1.0))  # 1 cm
 result = ext.add(inp).name
 ```
 
+**A Join that doesn't join is a `participantBodies` problem.** When the new
+geometry starts inside an existing body (an offset `startExtent`), the Join
+can still come back as a *separate* body — the delta line says `+1 body`
+where you expected none. The feature needs to be told which bodies take
+part, and that has to happen on the **input**, before `add()`:
+
+```python
+inp.participantBodies = [target_body]     # works
+f = ext.add(inp)
+f.participantBodies = [target_body]       # RuntimeError: 3 : Didn't roll
+                                          # editing feature back.
+```
+
+Setting it after the fact is not recoverable — you delete the feature and
+rebuild it. If the feature is already there, `combineFeatures` with
+`JoinFeatureOperation` merges the two bodies instead.
+
 `FeatureOperations`: `NewBodyFeatureOperation`, `JoinFeatureOperation`,
 `CutFeatureOperation`, `IntersectFeatureOperation`,
 `NewComponentFeatureOperation`.
