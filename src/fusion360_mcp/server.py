@@ -102,8 +102,15 @@ def call_fusion(code: str) -> list:
         return [{'type': 'image', 'data': value['image'], 'mimeType': 'image/png'}]
     # snapshot() is already formatted text; don't re-quote it as a JSON string.
     if isinstance(value, str):
-        return _text(value)
-    return _text(json.dumps(value, indent=2, ensure_ascii=False))
+        body = value
+    else:
+        body = json.dumps(value, indent=2, ensure_ascii=False)
+    # A build that returns nothing comes back as null; the delta line is what
+    # tells the caller it worked, without spending a snapshot() to find out.
+    changed = payload.get('changed')
+    if changed:
+        body = body + '\n[' + changed + ']'
+    return _text(body)
 
 
 def handle(req: dict):

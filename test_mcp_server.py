@@ -56,6 +56,12 @@ def call(code, _id=[10]):
 # undo(): a failed call rolls itself back, and a good call is undoable once.
 if live:
     before = call('result = snapshot()')['text']
+    # A previous failed run can leave TEST_* geometry behind, and then every
+    # assert below compares against a dirty baseline and blames the wrong
+    # thing. Say so instead.
+    assert 'TEST_' not in before, (
+        'leftover test geometry in the open document -- delete the TEST_* '
+        'bodies and their timeline entries, then rerun:\n' + before)
 
     build = ("import adsk.core, adsk.fusion\n"
              "sk = root.sketches.add(root.xYConstructionPlane)\n"
@@ -73,8 +79,13 @@ if live:
     assert call('result = snapshot()')['text'] == before, 'crash left geometry behind'
 
     # A call that succeeds is undoable, exactly once.
-    call(build % 'TEST_UNDO')
-    assert call('result = snapshot()')['text'] != before, 'build did nothing'
+    built = call(build % 'TEST_UNDO')['text']
+    # It reports what it changed, so a build needs no snapshot to confirm.
+    assert '[timeline' in built and 'body' in built, built
+    state = call('result = snapshot()')['text']
+    assert state != before, 'build did nothing'
+    # snapshot() names what the timeline holds, not just how much.
+    assert 'ExtrudeFeature' in state, state
     assert 'undone' in call('result = undo()')['text']
     assert call('result = snapshot()')['text'] == before, 'undo did not restore state'
     assert 'nothing to undo' in call('result = undo()')['text'], 'undo went too far'

@@ -76,6 +76,19 @@ is already `design.rootComponent` — don't redo it. If the user is in the
 Manufacture workspace, `design` comes back `None`; check before touching
 geometry.
 
+Also pre-bound: `snapshot()`, `screenshot()`, `api()`, `undo()`.
+
+**A call that changes the model says so.** The reply carries a delta line, so
+you don't need a `snapshot()` just to confirm a build worked:
+
+```
+null
+[timeline 3->5, +1 body]
+```
+
+No line means nothing changed — which is itself the answer when you expected
+a build to happen.
+
 ## Units — bug source number one
 
 The API **always** uses internal database units, regardless of what the user
@@ -414,26 +427,37 @@ and `api()` disagree, `api()` wins.
 Reach for it whenever you are about to guess a method name, and after any
 `AttributeError`.
 
-## References — check before guessing
+## Finding a class you don't have an object for
 
-This file covers the essentials. For the rest of the API, use `references/`:
+`api()` needs an object or a class. To find out whether something exists at
+all, grep the installed stubs — they are the API as this Fusion actually has
+it, which the online docs are not:
 
-- **`references/api-index.md`** — 1832 classes/enums with the official URL
-  for each. Grep it to find out whether something exists and what it's
-  called, then open the URL with WebFetch for the signature and example.
+    # Windows
+    grep -n "^class Revolve" ~/AppData/Roaming/Autodesk/Autodesk\ Fusion\ 360/API/Python/defs/adsk/fusion.py
+    # macOS
+    grep -n "^class Revolve" ~/Library/Application\ Support/Autodesk/Autodesk\ Fusion\ 360/API/Python/defs/adsk/fusion.py
 
-      grep -i "revolvefeature" references/api-index.md
+`core.py` and `fusion.py` hold almost everything; `cam.py`, `drawing.py`,
+`sim.py` cover the other workspaces. Once you have the class,
+`api(adsk.fusion.RevolveFeatures)` gives the signatures.
+
+Don't invent method names. If a grep over the stubs doesn't find it, it
+doesn't exist under that name — look for the related concept.
+
+## References
 
 - **`references/guides.md`** — 9 guides from the User's Manual: BRep, Design
   Intent, Events, Attributes, Selection Filters, Custom Graphics, Commands,
-  Command Inputs, Threading.
+  Command Inputs, Threading. Concepts the stubs don't explain.
 
       sed -n '/^## Attributes/,/^---/p' references/guides.md
 
-- **`references/README.md`** — which of the two to use for what.
-
-Don't invent method names. If you didn't find it in the index, the method
-probably doesn't exist under that name — look for the related concept.
+- **`references/api-index.md`** — 1106 classes with their doc URLs. Superseded
+  by `api()` and the stubs for everyday use, and it describes the *newest*
+  Fusion, which may not be yours — the versioned `deleteObject` trap above
+  came from trusting it. Kept for when you want the prose documentation of a
+  class and its examples: grep the name, open the URL with WebFetch.
 
 External sources: [User's Manual](https://help.autodesk.com/view/fusion360/ENU/?guid=GUID-C1545D80-D804-4CF3-886D-9B5C54B2D7A2),
 [object model PDF](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/ExtraFiles/Fusion.pdf),

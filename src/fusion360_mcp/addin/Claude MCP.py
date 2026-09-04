@@ -140,6 +140,17 @@ def _snapshot() -> str:
 
     if not groups:
         out.append('  (nenhum)')
+
+    # What the timeline holds, by type. These are the entries undo() removes,
+    # so seeing them saves a reconnaissance call before rolling anything back.
+    if parametric and d.timeline.count:
+        kinds = collections.OrderedDict()
+        for i in range(d.timeline.count):
+            ent = d.timeline.item(i).entity
+            name = type(ent).__name__ if ent else 'unknown'
+            kinds[name] = kinds.get(name, 0) + 1
+        out.append('timeline: ' + ', '.join(
+            '%dx%s' % (n, k) if n > 1 else k for k, n in kinds.items()))
     return chr(10).join(out)
 
 
@@ -316,6 +327,19 @@ def _undo() -> str:
         removed, 'y' if removed == 1 else 'ies', target)
 
 
+def _delta(mark, tl, bodies_before, root) -> str:
+    """One line on what the call changed in the model, or '' if nothing did."""
+    bits = []
+    if mark is not None and tl.count != mark:
+        bits.append('timeline %d->%d' % (mark, tl.count))
+    if root:
+        now = root.bRepBodies.count
+        if now != bodies_before:
+            diff = now - bodies_before
+            bits.append('%+d %s' % (diff, 'body' if abs(diff) == 1 else 'bodies'))
+    return ', '.join(bits)
+
+
 def _run_code(code: str) -> dict:
     """Exec user code with Fusion globals; return whatever it puts in `result`."""
     global _checkpoint  # noqa: PLW0603
@@ -339,7 +363,11 @@ def _run_code(code: str) -> dict:
     # end (user rolled back in the UI), and comparing against it would either
     # miss new features or delete ones that were already there.
     tl = _timeline()
-    mark = tl.count if tl else None
+    # `if tl is None`, never `if tl`: Timeline implements __len__, so an empty
+    # one is falsy and `tl.count if tl else None` silently disabled rollback
+    # and undo() in every fresh document -- the exact case a first model hits.
+    mark = tl.count if tl is not None else None
+    bodies_before = scope['root'].bRepBodies.count if scope['root'] else 0
 
     try:
         exec(code, scope)  # noqa: S102 - arbitrary execution is the whole point
@@ -381,6 +409,13 @@ def _run_code(code: str) -> dict:
         json.dumps(value)
     except (TypeError, ValueError):
         value = repr(value)
+
+    # Report what the call did to the model. A build that returns nothing
+    # otherwise comes back as null, and the caller spends a snapshot() just
+    # to find out whether it worked.
+    changed = _delta(mark, tl, bodies_before, scope['root'])
+    if changed:
+        return {'ok': True, 'result': value, 'changed': changed}
     return {'ok': True, 'result': value}
 
 

@@ -2,12 +2,22 @@
 
 Consulte sob demanda. Não carregue tudo — abra só o que a tarefa pede.
 
+**Antes de vir aqui:** para saber o que um objeto oferece, use `api(obj)` no
+`fusion_eval`; para saber se uma classe existe, faça grep nos stubs locais
+(`API/Python/defs/adsk/*.py`). Os dois leem a API **como instalada**, enquanto
+os arquivos abaixo descrevem a versão mais nova publicada pela Autodesk. Essa
+divergência é real: `TimelineObject.deleteObject` está na docs e não existe
+antes da ~2705.
+
 | Arquivo | O que tem | Quando abrir |
 |---|---|---|
-| `api-index.md` | 1832 classes, enums e handlers com a URL da página oficial de cada um | Quando precisa saber **se algo existe** ou **como se chama** |
 | `guides.md` | 9 guias conceituais completos do User's Manual | Quando precisa do **como fazer** de um assunto |
+| `api-index.md` | 1106 classes com a URL da página oficial de cada uma | Quando quer a **documentação em prosa** e os exemplos de uma classe |
 
-## api-index.md — achar a classe certa
+## api-index.md — a prosa oficial de uma classe
+
+Substituído por `api()` e pelos stubs no uso diário. Vale quando o que falta
+é a explicação e o exemplo, não a assinatura.
 
 Não leia o arquivo inteiro (212 KB). Faça grep:
 
@@ -56,8 +66,8 @@ defasado, peça ao Claude para regerar — o `api-index.md` sai do
 
 ## O que NÃO está aqui
 
-O texto detalhado de cada uma das 1832 classes — são páginas demais para
+O texto detalhado de cada uma das 1106 classes — são páginas demais para
 espelhar. O índice dá o nome e a URL; o detalhe vem por WebFetch na hora.
 
-Os stubs Python locais (`API/Python/defs/adsk/`) têm as assinaturas exatas da
-versão instalada e são a fonte mais precisa quando a docs online divergir.
+Assinaturas exatas não estão aqui de propósito: elas vêm de `api(obj)` e dos
+stubs locais, que refletem a versão instalada.
