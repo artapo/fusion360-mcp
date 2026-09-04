@@ -1,6 +1,6 @@
 [project]
 name = "fusion360-mcp"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP bridge that lets Claude Code drive Fusion 360 — run Python in the live session"
 readme = "README.md"
 requires-python = ">=3.9"
