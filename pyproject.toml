@@ -4,13 +4,13 @@ version = "0.1.0"
 description = "MCP bridge that lets Claude Code drive Fusion 360 — run Python in the live session"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "artapo" }]
 keywords = ["fusion360", "mcp", "claude", "cad", "autodesk"]
 classifiers = [
     "Environment :: Plugins",
     "Intended Audience :: Manufacturing",
-    "License :: OSI Approved :: MIT License",
+    "License :: OSI Approved :: Apache Software License",
     "Operating System :: Microsoft :: Windows",
     "Operating System :: MacOS",
     "Programming Language :: Python :: 3",

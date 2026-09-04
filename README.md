@@ -90,4 +90,8 @@ python test_mcp_server.py    # passa com o Fusion aberto ou fechado
 
 ## Licença
 
-MIT
+[Apache 2.0](LICENSE) — permissiva como a MIT, e com concessão explícita de
+patentes, que protege quem usa e quem contribui.
+
+Fusion 360 é marca da Autodesk, Inc. Este projeto não é afiliado à Autodesk
+nem endossado por ela.
