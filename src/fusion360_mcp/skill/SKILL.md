@@ -257,15 +257,37 @@ A sketch's local (x, y) maps onto global axes differently per plane, and two
 of the three flip a sign. Verified by placing a point at local (10, 0) and
 (0, 10) and reading `worldGeometry`:
 
-| Plane | local +x | local +y |
-|---|---|---|
-| `xYConstructionPlane` | +X | +Y |
-| `xZConstructionPlane` | +X | **−Z** |
-| `yZConstructionPlane` | **−Z** | +Y |
+| Plane | local +x | local +y | positive extrude |
+|---|---|---|---|
+| `xYConstructionPlane` | +X | +Y | +Z |
+| `xZConstructionPlane` | +X | **−Z** | **+Y** |
+| `yZConstructionPlane` | **−Z** | +Y | +X |
 
 The `yZ` case is the trap: neither local axis is Y-then-Z as the name
 suggests — local +x runs along **−Z**. On `xZ`, to place geometry at global
 Z = +150..+240 you sketch at local y = −240..−150.
+
+**`PositiveExtentDirection` follows the plane normal, not the name.** `xZ`
+has local y = −Z, yet it extrudes toward **+Y**. An offset plane keeps the
+normal of the plane it was offset from, so cutting *into* a body from the
+far side needs `NegativeExtentDirection`. Verified with magnet pockets cut
+into the four sides of a box sitting at X, Y ≥ 0:
+
+| Face | Sketch plane | Direction that cuts into the body |
+|---|---|---|
+| bottom (Y = 0) | `xZConstructionPlane` | positive |
+| top (Y = H) | `xZ` offset by H | **negative** |
+| left (X = 0) | `yZConstructionPlane` | positive |
+| right (X = W) | `yZ` offset by W | **negative** |
+
+```python
+inp.setOneSideExtent(
+    adsk.fusion.DistanceExtentDefinition.create(VI.createByString('2 mm')),
+    adsk.fusion.ExtentDirections.NegativeExtentDirection)
+```
+
+When unsure, cut one way and check that `body.physicalProperties.volume`
+went down before moving on.
 
 Don't reason it out — measure it. One point tells you the mapping:
 
