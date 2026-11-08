@@ -284,6 +284,48 @@ min.z = 0` from the bounding box while its points are actually at
 `worldGeometry` on a point; the bounding box will happily agree with a wrong
 mental model.
 
+## Sketch dimensions from the origin
+
+**Two points that share a coordinate exactly can't both be dimensioned
+from the origin.** Dimensioning the second one raises:
+
+    RuntimeError: 3 : VCS_SKETCH_OVER_CONSTRAINTS - La géométrie d'esquisse est surcontrainte
+
+(the message follows the UI language — search for the code, not the text).
+Four circles at (±3.4, ±1.9) cm, each given a diameter plus a horizontal
+and a vertical distance from `sk.originPoint`:
+
+    1,1   dia ok  dx ok    dy ok
+    1,-1  dia ok  dx FAIL  dy ok      <- same x as (1,1)
+    -1,1  dia ok  dx ok    dy FAIL    <- same y as (1,1)
+    -1,-1 dia ok  dx ok    dy ok
+
+The exact alignment acts as a hidden constraint. Either fix works:
+
+- create the geometry slightly off and let the dimension drive it to the
+  exact value — `addByCenterRadius(P(x + 0.011 * i, y + 0.011 * i, 0), r)`,
+  with `i` different per circle; both dimensions then go through;
+- state the relation instead of repeating it: dimension the first point,
+  then `geometricConstraints.addVerticalPoints(p1, p2)` (or
+  `addHorizontalPoints`) and a single dimension for the other coordinate.
+  Hanging the circles on the corners of a construction rectangle (centred
+  on the origin with a construction diagonal and `addMidPoint`) also works,
+  and gives you a width and height to drive.
+
+**Deleting a line that starts on `sk.originPoint` deletes the origin
+too** — and every dimension that hangs on it. `addByTwoPoints(sk.originPoint,
+...)` doesn't copy the point, it uses it (`ln.startSketchPoint ==
+sk.originPoint` is `True`):
+
+    before ln.deleteMe():  1 dimension, originPoint valid
+    after:                 0 dimensions, sk.originPoint is None
+
+Nothing moves, so nothing looks wrong — the sketch just stops being driven,
+and the next parameter change leaves that geometry behind.
+`sk.isFullyConstrained` turning `False` is the only sign. Leave helper
+lines that touch the origin in place (`isConstruction = True`) rather than
+deleting them, and check `isFullyConstrained` after any cleanup.
+
 ## Python: the gotchas
 
 **Out-args become tuples.** `Point3D.getData(out x, out y, out z)` in Python:
