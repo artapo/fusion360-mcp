@@ -333,6 +333,58 @@ param.value                             # always in cm
 In parametric designs every feature enters the timeline. `DirectDesignType`
 has no timeline — check `design.designType` before touching it.
 
+## Making a feature count follow a parameter
+
+Goal: one pocket per grid cell, with the cell count `Nx` a user parameter.
+Two obvious routes fail, one silently.
+
+**An extrude keeps the profiles it was created with.** Circles added to
+the sketch later — by hand or by a sketch pattern — are not added to the
+cut. Pockets patterned in the sketch with quantity `Nx`, cut by one
+extrude:
+
+    Nx x Ny = 1x1 -> 8 pockets      3x2 -> 8 pockets (expected 20)
+
+No error, no warning, timeline healthy. Count the result; the health state
+won't tell you. (The sketch pattern itself is fine and accepts quantity 1:
+`gc.createRectangularPatternInput(entities, PatternDistanceType.SpacingPatternDistanceType)`,
+then `setDirectionOne(sketch_line, VI.createByString('Nx'), VI.createByString('Pas_L'))`
+— the direction must be a `SketchLine`.)
+
+**A feature pattern fails as soon as no copy touches the body** — which is
+exactly `Nx = 1`, where the next cell is outside the part:
+
+    RuntimeError: 3 : ... PATTERN_FEATURES_NO_PASTE_INT_EDGES -
+    Aucune intersection possible entre une occurrence de réseau et le corps
+
+Quantity 1 fails the same way, with every `patternComputeOption`. Two
+coincident instances (spacing 0) fail too: the copy cuts nothing. Created
+at `Nx = 2` and then set to 1, the feature turns red (`healthState` 2).
+What stays healthy is two instances **0.02 mm apart** when `Nx = 1`:
+
+```python
+q   = 'max(Nx; 2)'
+gap = 'Pas_L * min(Nx - 1; 1) + 0.02 mm * (1 - min(Nx - 1; 1))'
+inp = rp.createInput(features, axis, VI.createByString(q),
+                     VI.createByString(gap),
+                     adsk.fusion.PatternDistanceType.SpacingPatternDistanceType)
+```
+
+    Nx = 1 -> 8 pockets   Nx = 2 -> 12   Nx = 3 -> 16   no errors
+
+At `Nx = 1` the pocket comes out 0.02 mm wider — irrelevant at 3D-printing
+tolerances. Create the pattern while `Nx >= 2` (that's how it was
+verified), then let the parameter go back to 1.
+
+**Expression functions separate arguments with `;` here**, not `,` —
+checked with `unitsManager.isValidExpression` on a French-language install:
+
+    max(Nx; 2)   True
+    max(Nx, 2)   False
+
+Likely locale-dependent, like material names: validate an expression before
+writing it into a feature.
+
 ## Materials
 
 A library material **cannot** be assigned straight to a body — it raises
