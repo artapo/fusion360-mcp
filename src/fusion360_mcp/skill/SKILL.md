@@ -683,3 +683,47 @@ External sources: [User's Manual](https://help.autodesk.com/view/fusion360/ENU/?
 [object model PDF](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/ExtraFiles/Fusion.pdf),
 and the local stubs at `API/Python/defs/adsk/` (exact signatures for the
 installed version — the most accurate source when the online docs disagree).
+
+## Drawings: reading a property can execute an action
+
+`adsk.drawing` is documented, but every class carries *"preview feature — may
+change in future releases. Do not use it in distributed programs."* Treat it
+as unsafe on a real document until proven otherwise.
+
+**`Sheet.tidyUp` is a property, not a method — reading it runs the rearrange.**
+The local stub declares `def tidyUp(self) -> bool`, which is wrong; the
+official docs list it under *properties*. Calling it the obvious way fails,
+and the "fix" is what does the damage:
+
+```python
+sh.tidyUp()   # TypeError: 'bool' object is not callable
+sh.tidyUp     # -> True, and the sheet has already been rearranged
+```
+
+There is no undo: the bridge's `undo()` only walks a Design timeline, and
+drawings have none. Recovery is Ctrl+Z in the UI, or closing without saving.
+
+On 2704.1.36 this corrupted a 9-view sheet. Before `tidyUp`, `View.type` and
+`View.viewCurves` both worked (635 curves on view 0); after, every view
+reported `isValid: True` while both members raised
+`RuntimeError: 2 : InternalValidationError : pAsset`, and `viewCurves`
+enumerated 0. The views become hollow. Do not run it on work you cannot
+afford to reopen.
+
+**`View` cannot be repositioned.** Its entire surface is `classType()`,
+`isValid`, `objectType`, `type` — verified against both the stub and
+`drawing_View.htm`. No position, scale, width or height. Laying out a sheet
+by API is not possible; `tidyUp` is the only rearrange, and it is the one
+above.
+
+Other traps in the same namespace:
+
+- `app.activeViewport` is `None` in the Drawing workspace, so the bridge's
+  `screenshot()` raises `AttributeError: 'NoneType' object has no attribute
+  'refresh'`. You cannot see a sheet from here.
+- `design` is `None` (the active product is `adsk::drawing::Drawing`), so
+  check before touching anything geometry-related.
+- `viewCurves` raises `IndexError` on `[0]` but iterates fine — and a
+  `next(iter(...))` that worked once can raise `StopIteration` later, because
+  the collection is only populated in the right context.
+- `Images` has no `count`.
