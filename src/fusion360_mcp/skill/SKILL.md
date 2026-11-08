@@ -176,6 +176,27 @@ Fusion doesn't know which instance you mean. The proxy carries the full path
 If a call fails complaining about assembly context, a proxy is missing. In
 single-component (root) designs this never comes up.
 
+**The error doesn't always mention context.** Rotating the bodies of a
+sub-component about that component's own axis, with a feature created in
+that component:
+
+```python
+mi = C.features.moveFeatures.createInput2(bodies)   # C = occ.component
+mi.defineAsRotate(C.xConstructionAxis, VI.createByString('90 deg'))
+# RuntimeError: 3 : Invalid entity
+```
+
+Verified side by side on the same bodies:
+
+    C.xConstructionAxis                                Invalid entity
+    C.xConstructionAxis.createForAssemblyContext(occ)  ok
+    root.xConstructionAxis                             ok
+    defineAsFreeMove(Matrix3D.setToRotation(...))      ok
+
+`Invalid entity` on construction geometry of a component that isn't the
+root means: pass the proxy. A free move with a matrix sidesteps entities
+altogether.
+
 ## The Input Object pattern
 
 Complex features always follow: `createInput` → configure → `add`. The input
