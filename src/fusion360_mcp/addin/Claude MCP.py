@@ -312,19 +312,84 @@ def _rollback_to(mark: int) -> int:
     return removed
 
 
+def _mark(design) -> dict:
+    """What a parametric design's timeline holds before a call: the design
+    itself, its entries and where the marker is.
+
+    A count alone is not enough to undo a call. When the marker sits
+    mid-history, Fusion inserts new features at the marker, not at the end,
+    so "everything after the old count" would be the tail of the existing
+    history -- deleting it removed features the call never touched.
+
+    The design is kept so the rollback works on the document the call
+    changed, not on whichever one is active by then: against another
+    document's timeline no entity matches, and every entry was deleted.
+    """
+    tl = design.timeline
+    return {'design': design, 'count': tl.count, 'marker': tl.markerPosition,
+            'entities': [tl.item(i).entity for i in range(tl.count)]}
+
+
+def _rollback_new(mark: dict) -> int:
+    """Delete the timeline entries that were not there at `mark`, wherever
+    they were inserted, and put the marker back where it was. Returns how
+    many went.
+
+    Works on the marked design's timeline even when another document is
+    active (Fusion allows deleting there). Entities are compared with ==,
+    never by entityToken (not guaranteed stable) or by name (the call may
+    have renamed things).
+    """
+    if not _alive(mark['design']):
+        return 0
+    tl = mark['design'].timeline
+    before = mark['entities']
+    # Never delete more than the call added: if == ever stops matching an
+    # old entity, the damage stays bounded instead of emptying the timeline.
+    # ponytail: count-based cap -- a call that added 2 entries and deleted 1
+    # old one leaves a new entry behind; the caller gets the rollback warning.
+    budget = tl.count - mark['count']
+    removed = 0
+    for i in range(tl.count - 1, -1, -1):
+        if removed >= budget:
+            break
+        entry = tl.item(i)
+        ent = entry.entity
+        if ent is None or any(ent == b for b in before):
+            continue
+        if _delete_entry(entry):
+            removed += 1
+    tl.markerPosition = min(mark['marker'], tl.count)
+    return removed
+
+
 def _undo() -> str:
     """Undo the last state-changing fusion_eval call. The Ctrl+Z of the bridge."""
     global _checkpoint  # noqa: PLW0603
     if _checkpoint is None:
         return 'nothing to undo (last call changed nothing, or already undone)'
-    tl = _timeline()
-    if tl is None:
-        return 'no parametric timeline: direct-modelling designs cannot roll back'
     target = _checkpoint
     _checkpoint = None  # ponytail: single level, matching one saved checkpoint
-    removed = _rollback_to(target)
-    return 'undone: %d timeline entr%s removed, back to position %d' % (
-        removed, 'y' if removed == 1 else 'ies', target)
+    if not _alive(target['design']):
+        return 'nothing to undo: the document that call changed was closed'
+    removed = _rollback_new(target)
+    tl = target['design'].timeline
+    return 'undone in %s: %d timeline entr%s removed, marker at %d of %d' % (
+        target['design'].parentDocument.name, removed,
+        'y' if removed == 1 else 'ies', tl.markerPosition, tl.count)
+
+
+def _alive(obj) -> bool:
+    """False once the object's document is gone (the call closed it).
+
+    Ask the Design, not the Timeline: on a closed document Design.isValid and
+    rootComponent.isValid turn False, but Timeline.isValid stays True while
+    timeline.count raises "4 : An API Object refers to a deleted Object".
+    """
+    try:
+        return obj is not None and obj.isValid
+    except Exception:  # noqa: BLE001 - a dead wrapper can raise on any access
+        return False
 
 
 def _delta(mark, tl, bodies_before, root) -> str:
@@ -358,15 +423,16 @@ def _run_code(code: str) -> dict:
     }
     if scope['design']:
         scope['root'] = scope['design'].rootComponent
+    design0 = scope['design']  # the user code may rebind `design`
 
-    # Checkpoint on count, not markerPosition: the marker can sit behind the
-    # end (user rolled back in the UI), and comparing against it would either
-    # miss new features or delete ones that were already there.
+    # Checkpoint on the entries themselves, not on a position: the marker can
+    # sit behind the end (user rolled back in the UI, or the call moved it),
+    # and new features then land mid-history, not after the old count.
     tl = _timeline()
     # `if tl is None`, never `if tl`: Timeline implements __len__, so an empty
     # one is falsy and `tl.count if tl else None` silently disabled rollback
     # and undo() in every fresh document -- the exact case a first model hits.
-    mark = tl.count if tl is not None else None
+    mark = _mark(design0) if tl is not None else None
     bodies_before = scope['root'].bRepBodies.count if scope['root'] else 0
 
     try:
@@ -376,15 +442,15 @@ def _run_code(code: str) -> dict:
         # halfway through never leaves half-built geometry behind.
         undone = 0
         rollback_err = ''
-        if mark is not None and tl.count > mark:
+        if mark is not None and _alive(design0) and tl.count > mark['count']:
             try:
-                undone = _rollback_to(mark)
+                undone = _rollback_new(mark)
             except Exception:  # noqa: BLE001 - rollback is best-effort
                 _trace('rollback failed: ' + traceback.format_exc())
                 rollback_err = traceback.format_exc().strip().splitlines()[-1]
             # Report a silent no-op too: geometry surviving the error is
             # something the caller must know before trying again.
-            if tl.count > mark and not rollback_err:
+            if _alive(design0) and tl.count > mark['count'] and not rollback_err:
                 rollback_err = 'no entry could be deleted'
         _checkpoint = None
         err = traceback.format_exc()
@@ -399,9 +465,17 @@ def _run_code(code: str) -> dict:
                     % rollback_err)
         return {'ok': False, 'error': err}
 
+    # The call may have closed the document it started in: its timeline and
+    # root are dead wrappers now, and reading them raised after the code had
+    # already succeeded. Nothing to checkpoint or report then. An older
+    # checkpoint is kept: it carries its own design, and undo() checks it.
+    if not _alive(design0):
+        tl, mark = None, None
+        scope['root'] = None
+
     # Only remember a checkpoint when the call actually built something;
     # undo() after a read-only call would otherwise clobber earlier work.
-    if mark is not None and tl.count > mark:
+    if mark is not None and tl.count > mark['count']:
         _checkpoint = mark
 
     value = scope.get('result')
@@ -413,7 +487,8 @@ def _run_code(code: str) -> dict:
     # Report what the call did to the model. A build that returns nothing
     # otherwise comes back as null, and the caller spends a snapshot() just
     # to find out whether it worked.
-    changed = _delta(mark, tl, bodies_before, scope['root'])
+    changed = _delta(mark['count'] if mark is not None else None, tl,
+                     bodies_before, scope['root'])
     if changed:
         return {'ok': True, 'result': value, 'changed': changed}
     return {'ok': True, 'result': value}
