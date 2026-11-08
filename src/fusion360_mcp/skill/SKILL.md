@@ -124,7 +124,7 @@ To display back to the user, format with `um.formatInternalValue(...)`.
 `ValueInput.createByString('10 mm')` respects the explicit unit and accepts
 expressions/parameters; `createByReal(1.0)` is always cm. Prefer
 `createByString` when you want the value to become a parametric expression
-in the model.
+in the model. Examples below abbreviate it as `VI = adsk.core.ValueInput`.
 
 ## Object model
 
@@ -186,12 +186,17 @@ mi.defineAsRotate(C.xConstructionAxis, VI.createByString('90 deg'))
 # RuntimeError: 3 : Invalid entity
 ```
 
-Verified side by side on the same bodies:
+Verified side by side, with the bodies both native (`C.bRepBodies`) and as
+proxies (`occ.bRepBodies`) — same result either way:
 
     C.xConstructionAxis                                Invalid entity
     C.xConstructionAxis.createForAssemblyContext(occ)  ok
-    root.xConstructionAxis                             ok
+    root.xConstructionAxis                             ok (*)
     defineAsFreeMove(Matrix3D.setToRotation(...))      ok
+
+(*) It runs, but it is the root's X axis: once the occurrence is moved, that
+is a different line from the component's own X, and the rotation lands
+elsewhere.
 
 `Invalid entity` on construction geometry of a component that isn't the
 root means: pass the proxy. A free move with a matrix sidesteps entities
