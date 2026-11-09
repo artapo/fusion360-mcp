@@ -154,6 +154,34 @@ Transient objects use static functions:
 is **ignored**. Geometry goes into the component you called from. Editing
 `Component1` means grabbing that component, not activating it in the UI.
 
+**Except sheet-metal flanges.** A flange added through
+`C.features.flangeFeatures.add(...)` puts its body in the component that is
+active in the UI — normally the root — not in `C`. A contour flange on a
+fresh component `C`, with the root active:
+
+    C.bRepBodies.count     0
+    root.bRepBodies.count  1      <- the flange body landed here
+
+The feature reports `healthState` 0 and an empty `errorOrWarningMessage`,
+so nothing flags it. Activate the occurrence around the call and put the
+root back:
+
+```python
+C.activeSheetMetalRule = rule      # was set in every run verified here
+occ.activate()
+try:
+    f = C.features.flangeFeatures.add(inp)
+finally:
+    design.activateRootComponent()
+```
+
+    C.bRepBodies.count     1
+    root.bRepBodies.count  0
+
+Verified with `createContourFlangeInput`. Base and edge flanges
+(`createBaseFlangeInput`, `createEdgeFlangeInput`) were only ever created
+under `activate()`, so wrap them the same way.
+
 Creating a new component = creating an occurrence:
 
 ```python
