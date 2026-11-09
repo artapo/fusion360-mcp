@@ -163,6 +163,32 @@ newComp = occ.component
 
 Editing a component affects **all** of its occurrences.
 
+**`addExistingComponent(comp, m)` does not place the occurrence at `m`.** It
+applies `m` on top of the transform of the component's first existing
+occurrence. When that occurrence sits at the identity the result looks
+right, which hides the trap. Asking for a pure translation of (1, 2, 3) cm:
+
+    component whose first occurrence is at identity   -> (1, 2, 3)
+    component whose first occurrence is elsewhere     -> (5.37, -15.16, -1.70)
+                                                         = first + (1, 2, 3),
+                                                           with first's rotation
+
+The full matrix matches "first occurrence's transform, then `m`"
+(`first.copy().transformBy(m)`), not the reverse. Set the transform again
+once the occurrence exists, then capture the position:
+
+```python
+o = root.occurrences.addExistingComponent(comp, m)
+o.transform2 = m                        # now it really is m
+if design.snapshots.hasPendingSnapshot:
+    design.snapshots.add()              # otherwise the move can be undone
+```
+
+An uncaptured move does not last in a parametric design. An occurrence set
+to (1, 2, 3) and left uncaptured was back at (5.37, -15.16, -1.70) after the
+next recompute, which here was triggered by `undo()`. The same goes for
+moving any existing occurrence through `transform2`.
+
 ## Proxies
 
 A face inside `Component9` that appears in two occurrences is ambiguous —
