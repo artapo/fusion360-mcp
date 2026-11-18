@@ -12,13 +12,18 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
         python: ["3.9", "3.13"]
-        # ubuntu-latest became 26.04, which has no Python 3.9 build.
-        # ponytail: pinned to 24.04 for 3.9 only; drop when 3.9 support goes.
+        # ubuntu-latest became 26.04, which has no Python 3.9 build, and
+        # macos-latest + 3.9 kept sitting in the queue for 10+ minutes.
+        # ponytail: 3.9 pinned to older images; drop when 3.9 support goes.
         exclude:
           - os: ubuntu-latest
             python: "3.9"
+          - os: macos-latest
+            python: "3.9"
         include:
           - os: ubuntu-24.04
+            python: "3.9"
+          - os: macos-14
             python: "3.9"
     runs-on: ${{ matrix.os }}
     steps:
