@@ -126,6 +126,13 @@ expressions/parameters; `createByReal(1.0)` is always cm. Prefer
 `createByString` when you want the value to become a parametric expression
 in the model. Examples below abbreviate it as `VI = adsk.core.ValueInput`.
 
+**Mesh files carry no unit.** `exportManager.createSTLExportOptions` writes
+**mm** by default, and `meshBodies.add(path, unit)` trusts whatever unit you
+pass. Re-importing that file with `CentimeterMeshUnit` gives a body 10× too
+big, with no error. Pass the unit the file was written in
+(`MillimeterMeshUnit` for Fusion's own export). For a file from elsewhere,
+check the size afterwards: `snapshot()` lists meshes with their size in mm.
+
 ## Object model
 
 `Application` → `Documents` / `Document` → `Product` (→ `Design`) →
@@ -886,7 +893,12 @@ line, which comes from the official guides.*
 - **Overrides** (`bendRadiusOverride`, `bendReliefOverride`,
   `two/threeBendCornerOverride`): not every feature has every one. On a base
   flange, merely *reading* one raises `Base flanges do not support sheet
-  metal rule overrides`. Until an override is set, `.bendRadius` is `None`.
+  metal rule overrides`. Base, edge and contour flanges are all
+  `FlangeFeature`, so when you loop over `flangeFeatures`, wrap each read in
+  `try`/`except RuntimeError` and skip the ones that raise. A base flange
+  always follows the rule: change `C.activeSheetMetalRule` (or the rule
+  itself) instead. Until an override is set, `.bendRadius` is `None`, which
+  means the rule's value applies: read `rule.bendRadius`.
   To set one on an existing feature, roll the marker to just before it, or
   it raises `Didn't roll editing feature back.`:
 
