@@ -779,14 +779,47 @@ afford to reopen.
 surface was `classType()`, `isValid`, `objectType`, `type`. The October 2026
 API (2706) added `scaleValue`, `orientation`, `style`, `tangentEdges`,
 `isShowThreadEdges`, `isShowInterferenceEdges` and
-`get/setCenterMarkOptions` / `get/setCenterLineOptions`. The docs mark the
-setters *"currently supports base views only"*. There is still no position,
-width or height: the 2706 stub was checked for them. Placement only happens at
-creation: `Views.createBaseViewInput()` returns a `BaseViewInput` with
-`placementPoint` and `viewParameters`, and `Views.add(input)` creates the view.
-These new members have been checked against the stub and docs but not yet run
-through `fusion_eval`. Apart from creating a view in the right place,
-`tidyUp` is still the only rearrange, and it is the one above.
+`get/setCenterMarkOptions` / `get/setCenterLineOptions`. Run through
+`fusion_eval` on 2706.1.17:
+
+- They work on **base views only**, getters included: on a projected view
+  (`type == 1`) even reading `scaleValue` raises `failed to read view scale`.
+  Setting `style` on the base view does carry over to its projected views.
+- A view made by automatic drawing creation reads `orientation == 10`
+  (`UnknownViewOrientationType`).
+- There is still no position, width or height. Placement only happens at
+  creation, and it works:
+
+  ```python
+  D = adsk.drawing
+  bi = sheet.views.createBaseViewInput()
+  bi.placementPoint = D.DrawingPoint.create(adsk.core.Point2D.create(330, 80))
+  bi.viewParameters.orientation = D.ViewOrientationTypes.IsoTopRightViewOrientationType
+  v = sheet.views.add(bi)
+  v.scaleValue = 1.5   # set AFTER add, see below
+  v.style = D.DrawingViewStyleTypes.ShadedVisibleEdgesDrawingViewStyleType
+  ```
+
+  `placementPoint` is the **centre** of the view, in sheet millimetres with
+  the origin at the bottom left (A3 is `sheet.width, sheet.height == 420, 297`).
+  The centre stays put when the scale changes later. `viewParameters`
+  honours `orientation`, but **ignores `scaleValue` and `style`**: the new
+  view copied them from the existing base view instead. Set both after
+  `add`.
+- `ViewCurve` exposes `startPoint`/`endPoint`/`centerPoint`/`midPoint` as
+  `DrawingPoint`s (`.coordinate` is the `Point2D`), which is how you find
+  where a view actually landed.
+
+Apart from creating a view in the right place, `tidyUp` is still the only
+rearrange, and it is the one above.
+
+Creating the drawing itself: `adsk.drawing.DrawingManager.get()`
+`.createDrawingInput(design_dataFile, mode)` then `.createDrawing(inp)`. The
+source must be saved (it takes a `DataFile`), the new `.f2d` lands in the same
+cloud folder, and it is **not opened**: `app.documents.open(dataFile)`.
+`ManualDrawingCreationMode` raises *"requires a template with view placeholder
+information"* unless you set `templateFile`; `AutomaticDrawingCreationMode`
+works with no template and lays out a base view plus projections.
 
 Other traps in the same namespace:
 
