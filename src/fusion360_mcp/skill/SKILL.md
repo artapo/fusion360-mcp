@@ -178,9 +178,13 @@ finally:
     C.bRepBodies.count     1
     root.bRepBodies.count  0
 
-Verified with `createContourFlangeInput`. Base and edge flanges
-(`createBaseFlangeInput`, `createEdgeFlangeInput`) were only ever created
-under `activate()`, so wrap them the same way.
+Verified with `createContourFlangeInput`. The official Sheet Metal Features
+guide (added with the October 2026 API) states the same rule for base,
+contour and lofted flanges: *"activate that component first
+(Occurrence.activate()). Otherwise the new body is created in the root
+component."* Edge flanges extend an existing body, and the guide doesn't
+mention them. `FlangeFeature.createForAssemblyContext` (new in 2706) is the
+usual proxy method that every feature has, not a way around this.
 
 Creating a new component = creating an occurrence:
 
@@ -726,13 +730,15 @@ doesn't exist under that name — look for the related concept.
 
 ## References
 
-- **`references/guides.md`** — 9 guides from the User's Manual: BRep, Design
+- **`references/guides.md`** — guides from the User's Manual: BRep, Design
   Intent, Events, Attributes, Selection Filters, Custom Graphics, Commands,
-  Command Inputs, Threading. Concepts the stubs don't explain.
+  Command Inputs, Threading, Sheet Metal (5 parts) and Configuration Rules.
+  Concepts the stubs don't explain.
 
       sed -n '/^## Attributes/,/^---/p' references/guides.md
 
-- **`references/api-index.md`** — 1106 classes with their doc URLs. Superseded
+- **`references/api-index.md`** — 1981 classes and enums with their doc URLs
+  (October 2026 API). Superseded
   by `api()` and the stubs for everyday use, and it describes the *newest*
   Fusion, which may not be yours — the versioned `deleteObject` trap above
   came from trusting it. Kept for when you want the prose documentation of a
@@ -769,11 +775,18 @@ reported `isValid: True` while both members raised
 enumerated 0. The views become hollow. Do not run it on work you cannot
 afford to reopen.
 
-**`View` cannot be repositioned.** Its entire surface is `classType()`,
-`isValid`, `objectType`, `type` — verified against both the stub and
-`drawing_View.htm`. No position, scale, width or height. Laying out a sheet
-by API is not possible; `tidyUp` is the only rearrange, and it is the one
-above.
+**`View` still cannot be moved after it exists.** On 2704.1.36 its entire
+surface was `classType()`, `isValid`, `objectType`, `type`. The October 2026
+API (2706) added `scaleValue`, `orientation`, `style`, `tangentEdges`,
+`isShowThreadEdges`, `isShowInterferenceEdges` and
+`get/setCenterMarkOptions` / `get/setCenterLineOptions`. The docs mark the
+setters *"currently supports base views only"*. There is still no position,
+width or height: the 2706 stub was checked for them. Placement only happens at
+creation: `Views.createBaseViewInput()` returns a `BaseViewInput` with
+`placementPoint` and `viewParameters`, and `Views.add(input)` creates the view.
+These new members have been checked against the stub and docs but not yet run
+through `fusion_eval`. Apart from creating a view in the right place,
+`tidyUp` is still the only rearrange, and it is the one above.
 
 Other traps in the same namespace:
 
@@ -786,3 +799,94 @@ Other traps in the same namespace:
   `next(iter(...))` that worked once can raise `StopIteration` later, because
   the collection is only populated in the right context.
 - `Images` has no `count`.
+
+## October 2026 API (2706): retired, removed, renamed
+
+From Autodesk's [What's New](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/WhatsNew.htm)
+and a diff of the official class list. Retired members still run for a while
+but disappear from code hints; removed ones are gone. Code from older
+examples, or from memory, still uses the left column:
+
+| Old | Use instead |
+|---|---|
+| `GeometricConstraints.addPerpendicular` (retired) | `addPerpendicular2`, which also takes curves other than lines |
+| `ConstructionPlaneInput.setByDistanceOnPath` (retired) | `setByPath` / `setByPathToObject` with a `ConstructionPlanePathDefinition` |
+| `PMILeaderLineNoteInput.geometry` (retired) | `PMILeaderLineNoteInput.geometries`, `PMILeaderLineNote.setGeometries` |
+| `CornerClosureDefinition`, `Two/ThreeBendCornerClosureDefinition` (removed) | `CornerClosureFeature.twoBendCornerOverride` / `threeBendCornerOverride` |
+| `InferredJointInput` (removed) | no direct replacement listed; assembly constraints are still preview and "will be broken" when the final API lands |
+| `volume.TransformRefGraphNodeProperty` (renamed) | `TransformReferenceGraphNodeProperty` |
+
+Also changed: the sketch-constraints selection filter now selects geometric
+constraints only, and dimensions have their own filter. Volumetric modeling
+is no longer preview. Much of the new sheet metal, T-Spline, drawing and
+configuration rules surface is still marked 🧪 in `api-index.md`.
+
+On a Fusion older than 2706, only the left column exists. `api()` settles it.
+
+## Sheet metal: rules and overrides
+
+*From the official Sheet Metal guides (in `references/guides.md`), not yet
+verified through `fusion_eval`. Replace this line with real output once it
+is.*
+
+- **A rule cannot be created from scratch.** Copy one with
+  `design.designSheetMetalRules.addByCopy(rule, name)` and edit the copy.
+  `designSheetMetalRules` is empty until the design has sheet metal, so in a
+  new design you assign a **library** rule to `C.activeSheetMetalRule`,
+  create the first feature, and only then copy rules into the design.
+- `rule.thickness.value` / `bendRadius.value` are in **cm**: `0.2` is 2 mm.
+  Setting `.expression = '2 mm'` avoids the conversion. `kFactor` is a plain
+  float, not a `SheetMetalRuleValue`.
+- Edge flange per-edge width: edges passed to `createEdgeFlangeInput` are
+  full-length and cannot be changed later. For other widths, pass `[]` and add
+  them through `inp.edgeDefinitions.addSymmetricEdge(...)` and its siblings.
+  A symmetric width of 5 mm gives a **10 mm** wide flange (it is per side).
+- `ContourFlangeInput.setSymmetricDirection(ValueInput)` replaces the distance
+  and applies to *each side*: 10 mm gives a 20 mm flange.
+- Hem setters take only `StartEdgeBendPositionType` or
+  `TangentToSideBendPositionType`. `InsideBendPositionType` is for edge flanges.
+- An unfold needs `isUnfoldAllBends = True` or a list of `bendFaces`. With
+  neither, `add` fails.
+- **Overrides** (`bendRadiusOverride`, `bendReliefOverride`,
+  `two/threeBendCornerOverride`): not every feature has every one, and base
+  flanges have none (they return `None`). To edit one on an existing feature,
+  roll the marker to just before it first:
+
+  ```python
+  f.timelineObject.rollTo(True)
+  f.bendRadiusOverride.setOverride(adsk.core.ValueInput.createByString('4 mm'))
+  design.timeline.moveToEnd()
+  ```
+
+  Don't reuse an input, or an override taken from it, for a second `add()`.
+- **Fusion for Personal Use throws** on overlap corner closures
+  (`setToOverlapAlignmentType`), join by bend, and sheet metal
+  fillets/chamfers. Those are licence errors, not code bugs.
+
+## Configuration rules
+
+*From the official Configuration Rules guide (in `references/guides.md`), not
+yet verified through `fusion_eval`.*
+
+- `design.configurationRulesManager` is `None` unless the design is a
+  Configured Design. Check it before doing anything else.
+- Reads work on any licence. Writes need the **Fusion Design Extension**:
+  without it they raise `RuntimeError`, and the issue code is
+  `EXTENSION_REQUIRED`.
+- Everything acts on the **active** design, and a rule is applied as soon as
+  the call returns. It isn't a timeline entry, so the bridge's `undo()`
+  almost certainly won't revert it (not yet tested). Read back the rule
+  before you change it, so you can put it back.
+- Rules live on a server: every read is a round trip. Use `getRules()` /
+  `itemById()` instead of indexing the manager, and check `issues` even on
+  a read.
+- Number values are in **internal units** (400 mm → `40.0`, 90° → `1.5708`).
+  Wherever the operator accepts one, prefer an expression (`'400 mm'`), which
+  carries its own unit.
+- Dropdown values are option **keys**, not labels. They read back as
+  `ConfigurationRuleStringListValue` even if written as `StringValue`.
+- A rule's `body` is replaced wholesale on update. To change one block, fetch
+  the rule, modify its body and resend the whole rule. `name`, `comment` and
+  `isActive` merge individually.
+- Order matters: rules are evaluated top to bottom. A non-empty
+  `orderedRuleIds` must list every rule that survives the delete phase.

@@ -1261,3 +1261,1664 @@ The main thing is that all Fusion specific work needs to be done by your add-in 
 		Comment on this page.
 
 ---
+
+## Sheet Metal API - Introduction
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/SheetMetalIntroduction_UM.htm
+
+Introduction to the Sheet Metal API
+
+The Sheet Metal API exposes the same sheet metal rules, features, and flat patterns you create in the Design workspace. Use it from a script or add-in to define and apply sheet metal rules, create and edit features (flanges, hems, corner closures, and more), and work with the resulting flat pattern for manufacturing.
+
+This introduction explains the sheet metal object model and how to create rules, features, and flat patterns from a script or add-in. The content is split into four topics. Examples use Python; the same types and methods are available in TypeScript and C++. For every class, method, and property, see the API Reference Manual (for example SheetMetalRule and HemFeatures).
+
+Before You Begin
+
+- Use a parametric design (history captured). Sheet metal is not supported in a direct, history-free design.
+
+- At the start of your script, define the application, design, root component, and document. Later samples assume these variables exist:
+
+```python
+import adsk.core, adsk.fusion
+
+app = adsk.core.Application.get()
+design = adsk.fusion.Design.cast(app.activeProduct)
+rootComp = design.rootComponent
+doc = app.activeDocument
+```
+
+- For runnable examples, see the Sheet Metal Rules Sample and other samples under Sheet Metal on the API Samples page.
+
+How the Sheet Metal API Is Structured
+
+The Sheet Metal API uses two entry points: the Design and its components. Knowing which to use helps you find rules, features, and flat patterns in code:
+
+- Rules live on the Design. SheetMetalRule objects come from design.designSheetMetalRules or design.librarySheetMetalRules.
+
+- Features and flat patterns live on each component. Sheet metal feature collections (flangeFeatures, hemFeatures, ripFeatures, and others) come from Component.features, alongside extrudes, fillets, and other feature types. A component's flat pattern comes from Component.flatPattern.
+
+Sketching on a flat pattern is the one exception. It goes through that flat pattern's own FlatPatternProduct in the document's products collection. See Flat Patterns.
+
+Area | Root | How you reach it
+
+Sheet metal rules | Design | design.designSheetMetalRules, design.librarySheetMetalRules
+
+Sheet metal features | Component | component.features.flangeFeatures, .hemFeatures, .ripFeatures, …
+
+Flat pattern | Component | component.flatPattern
+
+Topics in This Introduction
+
+- Sheet Metal API Overview – Feature collections, sheet metal bodies and rules, flat patterns, and the common feature pattern.
+
+- Sheet Metal Rules and Conversion – Rules, units, assigning rules to components, and converting solids to sheet metal.
+
+- Sheet Metal Features – Flanges, lofted flanges, hems, rips, corner closures, join by bend, rule overrides, folding and unfolding, fillets, and chamfers.
+
+- Flat Patterns – Creating flat patterns, bend info, and sketching on the flat pattern.
+
+Related API Reference
+
+- SheetMetalRule Object
+
+- FlangeFeatures Object
+
+- FlatPatternProduct Object
+
+---
+
+## Sheet Metal API - Overview
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/SheetMetalOverview_UM.htm
+
+Sheet Metal API Overview
+
+Sheet metal rules and features use the same Design and Component objects as sketches and solid features. You reach sheet metal features the same way you reach any other feature: through Component.features.
+
+Feature Collections on Component.features
+
+Each sheet metal feature type has its own collection on Component.features. The table lists the collections covered in this introduction and links to reference topics.
+
+Collection property | Feature types
+
+flangeFeatures | Base, contour, and edge flanges
+
+loftedFlangeFeatures | Lofted flanges
+
+hemFeatures | Hems
+
+ripFeatures | Rips
+
+cornerClosureFeatures | Corner closures
+
+joinByBendFeatures | Join by bend
+
+unfoldFeatures | Unfold (temporary flat)
+
+refoldFeatures | Refold
+
+foldFeatures | Fold (explicit bend lines)
+
+sheetMetalFilletFeatures | Sheet metal fillets
+
+sheetMetalChamferFeatures | Sheet metal chamfers
+
+The following example gets collections from the root component:
+
+```python
+import adsk.core, adsk.fusion
+
+app = adsk.core.Application.get()
+design = adsk.fusion.Design.cast(app.activeProduct)
+rootComp = design.rootComponent
+
+# Feature collections for sheet metal live on Component.features, alongside
+# extrudes, fillets, and every other feature type.
+hemFeatures = rootComp.features.hemFeatures
+ripFeatures = rootComp.features.ripFeatures
+# Same pattern for other collections, for example flanges:
+flangeFeatures = rootComp.features.flangeFeatures
+```
+
+Sheet Metal Bodies and Rules
+
+A sheet metal body has a sheet metal rule applied. Use BRepBody.isSheetMetal to test a body.
+
+Rules are SheetMetalRule objects in either:
+
+- design.designSheetMetalRules – rules stored in the document.
+
+- design.librarySheetMetalRules – rules from libraries.
+
+Details are in Sheet Metal Rules and Conversion.
+
+Flat Pattern
+
+Each sheet metal component can have one flat pattern. Read it from Component.flatPattern, which returns None if the component does not have a flat pattern yet:
+
+```python
+flatPattern = rootComp.flatPattern
+if flatPattern is None:
+    # No flat pattern yet. See Flat Patterns for Component.createFlatPattern.
+    raise RuntimeError('No flat pattern in this component')
+```
+
+Each flat pattern also has its own FlatPatternProduct in the document. You only need it to sketch on the flat pattern.
+
+Tip: Create the flat pattern with Component.createFlatPattern first, then read geometry from the FlatPattern and sketch on it through FlatPatternComponent. See Flat Patterns.
+
+Common API Pattern for Features
+
+Sheet metal features follow the usual Fusion pattern:
+
+- Get the collection from Component.features.
+
+- Create an input object (createInput or a type-specific create…Input method).
+
+- Set properties on the input (the same options as in the command dialog).
+
+- Call add(input).
+
+Edge, face, profile, sketch, and body variables in the examples (edge1, hemEdge, profile, sketch, body, and so on) are assumed to come from your own selection or query code, such as UserInterface.selectEntity or traversing a body's edges and faces. When an input accepts multiple edges or profiles, pass a plain Python list, not an ObjectCollection.
+
+---
+
+## Sheet Metal API - Rules and Conversion
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/SheetMetalRules_UM.htm
+
+Sheet Metal Rules and Conversion
+
+A SheetMetalRule bundles the manufacturing parameters for a material: thickness, bend radius, k-factor, and relief behavior. You assign a rule to a component rather than defining thickness per body, similar to assigning a material.
+
+There is no way to create a rule from scratch. Copy an existing rule from the design or library with the addByCopy method of SheetMetalRules, then edit the copy.
+
+Note: The designSheetMetalRules collection is only available once the design contains sheet metal. In a new design, assign a library rule to the component's activeSheetMetalRule (see Assign a Rule to a Component, below), create the first sheet metal feature, and then copy rules into the design.
+
+Create and Edit a Rule
+
+The following example copies the default library rule into a design that already contains sheet metal:
+
+```python
+import adsk.core, adsk.fusion
+
+app = adsk.core.Application.get()
+design = adsk.fusion.Design.cast(app.activeProduct)
+
+# Copy the default library rule into the design.
+steelRule = design.librarySheetMetalRules.itemByName('Steel (mm)')
+newRule = design.designSheetMetalRules.addByCopy(steelRule, 'Steel (2 mm)')
+
+# The thickness and bendRadius properties are SheetMetalRuleValue objects.
+# Set either a numeric value (in centimeters) or an expression string.
+newRule.thickness.value = 0.2
+newRule.bendRadius.expression = 'Thickness'
+
+# kFactor is a plain unitless ratio on the rule, not a SheetMetalRuleValue.
+newRule.kFactor = 0.44
+```
+
+Note: For SheetMetalRuleValue, the value property is in centimeters (Fusion internal length units). Setting newRule.thickness.value = 0.2 means 2 mm. To stay consistent with unit strings in the rest of your script, you can set expression instead (for example '2 mm') or use ValueInput.createByString('2 mm') where the API accepts ValueInput. See SheetMetalRuleValue Object.
+
+Tip: Call addByCopy on designSheetMetalRules to store the copy in the document, or on librarySheetMetalRules to store it in the library. The Sheet Metal Rules Sample shows a complete example that copies within the library.
+
+The most frequently used properties are thickness, bendRadius, and kFactor. The SheetMetalRule reference topic lists relief shape and size, the gap for miter, rip, and seam conditions, and other rule settings.
+
+Code samples in this introduction are self-contained. Later examples re-fetch rules or edges instead of assuming a variable such as newRule still exists.
+
+Assign a Rule to a Component
+
+Assign the rule to the component where you will create sheet metal geometry, the same as in the UI. Set component.activeSheetMetalRule before creating base flanges or other features on that component. This works the same way for nested components. To create a flange that starts a new body in a nested component, also activate that component first (see Sheet Metal Features).
+
+In a new design, assign a library rule:
+
+```python
+rootComp.activeSheetMetalRule = design.librarySheetMetalRules.itemByName('Steel (mm)')
+```
+
+Once the design contains sheet metal, you can assign a design rule instead, such as the copy created above:
+
+```python
+rootComp.activeSheetMetalRule = design.designSheetMetalRules.itemByName('Steel (2 mm)')
+```
+
+Convert a Body to Sheet Metal
+
+An imported solid, or a body built from ordinary extrudes and other non-sheet-metal features, is not sheet metal. Sheet metal features cannot operate on it until you convert it.
+
+Call BRepBody.convertToSheetMetal, passing a face used to measure thickness and the rule to assign:
+
+```python
+body = rootComp.bRepBodies.item(0)
+
+# Pass one of the large flat faces of the sheet; thickness is measured from it.
+# item(0) stands in for your own face selection.
+thicknessFace = body.faces.item(0)
+body.convertToSheetMetal(thicknessFace, rootComp.activeSheetMetalRule)
+```
+
+After conversion, body.isSheetMetal is True and the body works with flangeFeatures, hemFeatures, and the other sheet metal collections.
+
+For the interactive workflow, see product help for Convert to Sheet Metal.
+
+---
+
+## Sheet Metal API - Features
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/SheetMetalFeatures_UM.htm
+
+Sheet Metal Features
+
+Each sheet metal feature collection uses the pattern described in Sheet Metal API Overview: create an input, set the same options you would set in the command dialog, then call add.
+
+The input object is analogous to the command dialog. For example, the Edge Flange dialog below shows the settings that EdgeFlangeInput exposes:
+
+- Edges/Profiles – the edges passed to createEdgeFlangeInput. The edge list above Edges/Profiles, with Full edge for each edge, corresponds to edgeDefinitions.
+
+- Extent type and Height – the distance passed to createEdgeFlangeInput, or setToObjectExtent to extend to an object.
+
+- Angle – angle.
+
+- Height datum – heightDatumType.
+
+- Bend position – bendPositionType.
+
+- Bend override – bendRadiusOverride and bendReliefOverride.
+
+- 2-Bend corner override – twoBendCornerOverride.
+
+- 3-Bend corner override – threeBendCornerOverride.
+
+Flanges
+
+flangeFeatures covers three flange types, each with its own input: EdgeFlangeInput, BaseFlangeInput, and ContourFlangeInput.
+
+- Edge flange – adds material along one or more edges with distance and bend angle.
+
+- Base flange – starts a new sheet metal body from one or more profiles.
+
+- Contour flange – extrudes one or more open profiles a specified distance.
+
+Edge Flange
+
+```python
+import adsk.core, adsk.fusion
+
+app = adsk.core.Application.get()
+design = adsk.fusion.Design.cast(app.activeProduct)
+rootComp = design.rootComponent
+flangeFeatures = rootComp.features.flangeFeatures
+
+flangeEdges = [edge1, edge2]
+
+edgeFlangeInput = flangeFeatures.createEdgeFlangeInput(
+    flangeEdges,
+    adsk.core.ValueInput.createByString('10 mm'))
+edgeFlangeInput.bendPositionType = adsk.fusion.BendPositionTypes.InsideBendPositionType
+edgeFlangeInput.angle = adsk.core.ValueInput.createByString('90 deg')
+flangeFeature = flangeFeatures.add(edgeFlangeInput)
+```
+
+The distance argument is the flange height (the Height field), shared by every edge in the input. It is not a per-edge value.
+
+Per-edge width (how much of each edge's length the flange covers) is controlled separately:
+
+- Edges passed directly to createEdgeFlangeInput are full-length and cannot be changed afterward.
+
+- For custom widths, pass an empty edge list and add edges through edgeFlangeInput.edgeDefinitions:
+
+```python
+edgeFlangeInput = flangeFeatures.createEdgeFlangeInput(
+    [], adsk.core.ValueInput.createByString('10 mm'))
+edgeFlangeInput.edgeDefinitions.addFullLengthEdge(edge2)
+edgeFlangeInput.edgeDefinitions.addSymmetricEdge(
+    edge1, adsk.core.ValueInput.createByString('5 mm'))
+```
+
+The edgeDefinitions methods are:
+
+- addFullLengthEdge – full edge length.
+
+- addSymmetricEdge – width centered on the edge midpoint (total width is twice the value given).
+
+- addTwoSidedEdge – independent widths from the midpoint.
+
+- addTwoOffsetsEdge – insets from each end of the edge.
+
+Other edge flange input properties:
+
+- heightDatumType (FlangeHeightDatumTypes) – where the distance is measured from: the outer faces (OuterFacesFlangeHeightDatumType, the default), the inner faces (InnerFacesFlangeHeightDatumType), or tangent to the bend (TangentToBendFlangeHeightDatumType).
+
+- isMiteredCorners – miter where adjacent edge flanges meet.
+
+- setToObjectExtent(toEntity, offset) – extend to another face or plane instead of a fixed distance.
+
+Base and Contour Flanges
+
+Set activeSheetMetalRule on the component before creating a base, contour, or lofted flange; the rule sets the new body's thickness:
+
+```python
+rootComp.activeSheetMetalRule = design.librarySheetMetalRules.itemByName('Steel (mm)')
+profile = sketch.profiles.item(0)
+baseFlangeInput = flangeFeatures.createBaseFlangeInput([profile])
+flangeFeature = flangeFeatures.add(baseFlangeInput)
+```
+
+Note: When you create a base, contour, or lofted flange in a nested component, activate that component first (Occurrence.activate()). Otherwise the new body is created in the root component.
+
+Base and contour inputs expose operation (FeatureOperations). Because they create the initial sheet metal body from a profile, only NewBodyFeatureOperation (the default) and NewComponentFeatureOperation are valid.
+
+The orientation property (FlangeOrientations) controls which side of the profile plane receives material: SideOneFlangeOrientation, SideTwoFlangeOrientation, or CenteredFlangeOrientation.
+
+A contour flange takes open profiles, which you create from sketch curves with Component.createOpenProfile. The following example creates a symmetric contour flange. The setSymmetricDirection method replaces the distance passed to createContourFlangeInput and applies its own distance to each side of the profile plane, so '10 mm' gives a 20 mm flange:
+
+```python
+# line1 is the first sketch line of an open sketch shape, such as an L.
+openProfile = rootComp.createOpenProfile(line1, True)
+contourFlangeInput = flangeFeatures.createContourFlangeInput(
+    [openProfile], adsk.core.ValueInput.createByString('10 mm'))
+contourFlangeInput.setSymmetricDirection(adsk.core.ValueInput.createByString('10 mm'))
+flangeFeature = flangeFeatures.add(contourFlangeInput)
+```
+
+Lofted Flanges
+
+Lofted flanges use loftedFlangeFeatures, not flangeFeatures. They loft between exactly two profiles, which must both be open or both be closed and must lie on separate planes.
+
+The formingType property (LoftedFlangeFormingTypes) controls how the flange is formed. The default, BrakeFormLoftedFlangeFormingType, approximates the loft with flat facets joined by straight bends, as a press brake would. DieFormLoftedFlangeFormingType produces a smooth surface instead. Lofted flange inputs also have an orientation property, as base and contour flanges do.
+
+With brake forming, you must set the facet control before calling add, using one of:
+
+- setFacetControlByChordTolerance – the maximum distance between the true surface and the facets.
+
+- setFacetControlByFacetAngle – the maximum angle between adjacent facets.
+
+- setFacetControlByFacetDistance – the maximum length of a facet edge.
+
+- setFacetControlByFacetNumber – a fixed number of facets, from 1 to 1000.
+
+For open profiles, create each one with Component.createOpenProfile, as for a contour flange.
+
+```python
+loftedFlangeFeatures = rootComp.features.loftedFlangeFeatures
+# startCurve and endCurve are sketch curves on two separate planes.
+startProfile = rootComp.createOpenProfile(startCurve, True)
+endProfile = rootComp.createOpenProfile(endCurve, True)
+profiles = [startProfile, endProfile]
+loftedFlangeInput = loftedFlangeFeatures.createInput(profiles)
+loftedFlangeInput.setFacetControlByFacetNumber(adsk.core.ValueInput.createByReal(10))
+loftedFlangeFeature = loftedFlangeFeatures.add(loftedFlangeInput)
+```
+
+Hems
+
+hemFeatures fold material back at an edge. Configure HemFeatureInput with the setter for the hem style (flat, open, rolled, rope, teardrop, or double), such as setFlatHem or setRolledHem. Every hem setter takes a bend position, which must be StartEdgeBendPositionType or TangentToSideBendPositionType. The other BendPositionTypes values, such as InsideBendPositionType, apply to edge flanges and are not valid for hems.
+
+```python
+hemFeatures = rootComp.features.hemFeatures
+hemInput = hemFeatures.createHemFeatureInput()
+
+# The third argument, isFlipped, reverses the fold direction when True. False keeps the default direction.
+hemInput.setFlatHem(
+    hemEdge,
+    adsk.core.ValueInput.createByString('5 mm'),
+    False,
+    adsk.fusion.BendPositionTypes.StartEdgeBendPositionType)
+hemFeature = hemFeatures.add(hemInput)
+```
+
+Rips
+
+ripFeatures cut a gap so a closed shape can unfold. Configure RipFeatureInput with:
+
+- setByFace – removes an entire face.
+
+- setAlongEdge – creates a gap along an edge. The edge must lie between two smoothly connected faces on the same side of the sheet, such as the line where a flat face runs into a bend. A sharp corner edge or an outer boundary edge is rejected.
+
+- setBetweenPoints(pointOne, pointTwo, gapDistance, offsetOne, offsetTwo) – creates a gap between two points.
+
+```python
+ripFeatures = rootComp.features.ripFeatures
+ripInput = ripFeatures.createRipFeatureInput()
+ripInput.setAlongEdge(ripEdge, adsk.core.ValueInput.createByString('1 mm'))
+ripFeature = ripFeatures.add(ripInput)
+```
+
+Corner Closures
+
+cornerClosureFeatures connect and miter two planar flanges at a corner. CornerClosureFeatureInput is created from the dominant edge and the submissive edge of the corner closure: one linear edge from each of two flanges that meet at the corner. When you select edges in the Corner Closure command, the first edge is the dominant edge and the second is the submissive edge.
+
+When the input is created, the alignment type is a symmetric gap; set the gap distance with gap. To set the alignment type to an overlap, call setToOverlapAlignmentType(overlap, isFlipped). The overlap argument is the overlap percentage, a unitless value from 0 (no overlap) to 1 (100% overlap). The isFlipped argument defines whether the dominant edge goes over the submissive edge or vice versa.
+
+The isWidthExtentAligned property controls whether the corner closure extends along the flange edges, aligned with the edge direction (True, the default), or perpendicular to the flange edges (False). The bendTransition property (BendTransitionTypes) can be smooth (SmoothCornerBendTransitionType, the default), straight line (StraightLineCornerBendTransitionType), or trim to bend (TrimToBendCornerBendTransitionType).
+
+Note: Overlap alignment is not available in Fusion for Personal Use. In Fusion for Personal Use, calling setToOverlapAlignmentType or editing an existing corner closure that uses an overlap throws an exception.
+
+```python
+cornerClosureFeatures = rootComp.features.cornerClosureFeatures
+cornerInput = cornerClosureFeatures.createInput(dominantEdge, submissiveEdge)
+cornerInput.gap = adsk.core.ValueInput.createByString('1 mm')
+cornerClosureFeature = cornerClosureFeatures.add(cornerInput)
+```
+
+The read-only closureType property (CornerClosureTypes) reports whether the corner is a two-bend or three-bend corner, which determines which corner override type applies (see the table in Sheet Metal Rule Overrides).
+
+Join by Bend
+
+Use joinByBendFeatures to join two sheet metal bodies with a bend, using one edge from each of the two bodies.
+
+```python
+joinByBendFeatures = rootComp.features.joinByBendFeatures
+joinInput = joinByBendFeatures.createInput(edge1, edge2)
+joinByBendFeature = joinByBendFeatures.add(joinInput)
+```
+
+Join by bend features support bendRadiusOverride and bendReliefOverride, but not corner overrides.
+
+Note: Join by bend is not available in Fusion for Personal Use. Creating or editing a join by bend feature in Fusion for Personal Use throws an exception.
+
+Sheet Metal Rule Overrides
+
+A feature can override part of the active rule locally. The override objects are BendRadiusOverride, BendReliefOverride, TwoBendCornerOverride, and ThreeBendCornerOverride. Each feature exposes only the overrides that apply to it:
+
+Feature | bendRadiusOverride | bendReliefOverride | twoBendCornerOverride / threeBendCornerOverride
+
+Base flange | no | no | no
+
+Contour flange | yes | no | no
+
+Edge flange | yes | yes | yes (whichever matches the corner)
+
+Hem | yes, except rolled, rope, and teardrop hems | open and double hems only | no
+
+Corner closure | no | no | yes (matches closureType)
+
+Join by bend | yes | yes | no
+
+On the input object while creating the feature:
+
+```python
+edgeFlangeInput = flangeFeatures.createEdgeFlangeInput(
+    [edge1, edge2], adsk.core.ValueInput.createByString('10 mm'))
+edgeFlangeInput.bendRadiusOverride.setOverride(adsk.core.ValueInput.createByString('3 mm'))
+flangeFeature = flangeFeatures.add(edgeFlangeInput)
+```
+
+On an existing feature, roll the timeline marker before that feature, edit it, then move the marker back to the end:
+
+```python
+# flangeFeature is an existing edge flange, such as the one created above.
+flangeFeature.timelineObject.rollTo(True)
+flangeFeature.bendRadiusOverride.setOverride(adsk.core.ValueInput.createByString('4 mm'))
+design.timeline.moveToEnd()
+```
+
+Other override types use the same pattern with different setOverride arguments. Every override object supports isOverridden and clearOverride().
+
+Folding and Unfolding
+
+Unfold and Refold work as a pair:
+
+- UnfoldFeature temporarily unfolds bends around a stationary face so you can add sketches, holes, or other features on the flat shape.
+
+- A refold feature refolds the bends that an unfold feature flattened. Create its RefoldFeatureInput from that unfold feature.
+
+Besides the stationary face, the unfold input needs to know which bends to unfold. Either set isUnfoldAllBends to True, or set bendFaces to the inner or outer cylindrical face of each bend to unfold. If you do neither, add fails.
+
+```python
+unfoldFeatures = rootComp.features.unfoldFeatures
+refoldFeatures = rootComp.features.refoldFeatures
+
+stationaryFace = body.faces.item(0)
+unfoldInput = unfoldFeatures.createInput(stationaryFace)
+unfoldInput.isUnfoldAllBends = True
+unfoldFeature = unfoldFeatures.add(unfoldInput)
+
+# Add sketch, hole, or other features on the flat body here.
+
+refoldInput = refoldFeatures.createInput(unfoldFeature)
+refoldFeature = refoldFeatures.add(refoldInput)
+```
+
+FoldFeatures is separate: you add explicit bend lines on the input instead of unfolding existing flange bends.
+
+Sheet Metal Fillets and Chamfers
+
+sheetMetalFilletFeatures and sheetMetalChamferFeatures are separate from the general filletFeatures and chamferFeatures collections. They operate only on thickness-direction edges (perpendicular to the sheet metal front and back faces).
+
+Edges are grouped into edge sets, and each set has one radius or distance.
+
+```python
+sheetMetalFilletFeatures = rootComp.features.sheetMetalFilletFeatures
+filletInput = sheetMetalFilletFeatures.createInput()
+filletInput.edgeSetInputs.add(filletEdges, adsk.core.ValueInput.createByString('1 mm'))
+filletFeature = sheetMetalFilletFeatures.add(filletInput)
+```
+
+Chamfers use the same pattern, with a distance instead of a radius:
+
+```python
+sheetMetalChamferFeatures = rootComp.features.sheetMetalChamferFeatures
+chamferInput = sheetMetalChamferFeatures.createInput()
+chamferInput.edgeSetInputs.add(chamferEdges, adsk.core.ValueInput.createByString('1 mm'))
+chamferFeature = sheetMetalChamferFeatures.add(chamferInput)
+```
+
+Note: Sheet metal fillets and chamfers are not available in Fusion for Personal Use. Creating or editing them in Fusion for Personal Use throws an exception.
+
+---
+
+## Sheet Metal API - Flat Patterns
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/SheetMetalFlatPatterns_UM.htm
+
+Flat Patterns
+
+A flat pattern is the persistent unfolded counterpart to a sheet metal component. It is separate from the temporary Unfold feature in Sheet Metal Features.
+
+The FlatPattern object exposes flattened geometry: bend lines, extent lines, and the top, bottom, and side faces of the flat body.
+
+Create a Flat Pattern
+
+Call Component.createFlatPattern on the component that owns the sheet metal body. Pass a face to hold stationary while the rest unfolds.
+
+```python
+import adsk.core, adsk.fusion
+
+app = adsk.core.Application.get()
+design = adsk.fusion.Design.cast(app.activeProduct)
+rootComp = design.rootComponent
+doc = app.activeDocument
+body = rootComp.bRepBodies.item(0)
+
+stationaryFace = body.faces.item(0)
+flatPattern = rootComp.createFlatPattern(stationaryFace)
+```
+
+The createFlatPattern method returns the FlatPattern object directly. It fails if the component already has a flat pattern. To get an existing flat pattern, use Component.flatPattern, which returns None if the component does not have one.
+
+FlatPattern is a timeline feature. Useful properties and methods include:
+
+Member | Purpose
+
+flatBody | Flattened BRepBody
+
+bendLinesBody | Bend line geometry
+
+extentLinesBody | Extent lines
+
+topFace, bottomFace, sideFaces | Faces on the flat body
+
+foldedBody | Original folded body
+
+getBendInfo(bendEdge) | Fold direction and angle for a bend edge
+
+Sketch on the Flat Pattern
+
+Each flat pattern has its own FlatPatternProduct in the document. Sketches on the flat pattern use that product's FlatPatternComponent, from FlatPatternProduct.rootComponent. No property leads from a FlatPattern to its product, so find the product in the document's products collection by matching the flat pattern's entityToken:
+
+```python
+flatPattern = rootComp.flatPattern
+
+# Find the FlatPatternProduct that belongs to this flat pattern.
+fpComponent = None
+for product in doc.products:
+    fpProduct = adsk.fusion.FlatPatternProduct.cast(product)
+    if fpProduct and fpProduct.flatPattern.entityToken == flatPattern.entityToken:
+        fpComponent = adsk.fusion.FlatPatternComponent.cast(fpProduct.rootComponent)
+        break
+
+sketchOnFlat = fpComponent.sketches.add(flatPattern.topFace)
+
+# Draw a 5 mm radius circle on the flat pattern. Sketch coordinates are in centimeters.
+sketchOnFlat.sketchCurves.sketchCircles.addByCenterRadius(
+    adsk.core.Point3D.create(0, 0, 0), 0.5)
+```
+
+Read Bend Information
+
+To read the fold direction and angle of each bend, call getBendInfo on each edge of the flat pattern's bendLinesBody:
+
+```python
+import math
+
+flatPattern = rootComp.flatPattern
+bendLinesBody = flatPattern.bendLinesBody
+for bendEdge in bendLinesBody.edges:
+    ok, isBendUp, bendAngleRad = flatPattern.getBendInfo(bendEdge)
+    if ok:
+        print(f'Bend angle: {math.degrees(bendAngleRad):.1f} deg, up={isBendUp}')
+```
+
+Tip: Workflow order is (1) build the sheet metal body in the design, (2) createFlatPattern, (3) read bends and sketch on FlatPatternComponent.
+
+Samples
+
+The Sheet Metal category on API Samples includes complete sample scripts for sheet metal workflows.
+
+Related API Reference
+
+- FlatPattern Object
+
+- FlatPatternProduct Object
+
+- FlatPatternComponent Object
+
+---
+
+## Configuration Rules
+
+Fonte: https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/ConfigurationRules_UM.htm
+
+Configuration Rules NIDL API Reference
+
+The Configuration Rules API lets you read and author the rules that drive and limit the configured aspects of a Configured Design in Fusion — the same rules you can build on the Rules Canvas, expressed as typed objects in code.
+
+Preview: The Configuration Rules API is provided in preview. Its objects, methods, and properties may change in a future release.
+
+In this Document
+
+Overview — what a configuration rule is and the object model.
+
+Getting Started — prerequisites, reaching the manager, and the script scaffold the examples use.
+
+Reading Rules — getRules, itemById, itemByIds.
+
+Modifying Rules — add, update, delete, reorder, and round-trip as JSON.
+
+Building Rule Bodies — the typed statement and condition blocks.
+
+Columns and Values — the columns a rule can target, the value to use for each, and expressions.
+
+Issues and Errors — handling problems reported by a call you made.
+
+Rule Statuses — getStatuses, getStatusesByRuleId, getStatusesByConfigurationId.
+
+Best Practices — writing predictable rules.
+
+See also
+
+Overview
+
+What a Configuration Rule Is
+
+A configuration rule is a logical rule that limits or drives the values of the configured aspects of a Configured Design. Each rule is evaluated against every configuration in the design — the configurations in order from left to right — and the rules themselves are evaluated from top to bottom. A rule produces one of two kinds of result for a configured aspect:
+
+- A driven value is a single valid value the rule determines. Because there is only one valid value, it cannot be changed.
+
+- A limited value is a subset of valid values the rule determines. It can be changed, but only within that subset.
+
+In the user interface, you author rules on the Rules Canvas by connecting blocks from the Toolbox into conditional statements. The API works with the same rules and the same building blocks, but you construct them as typed objects in code. A rule you create with the API appears on the Rules Canvas, and a rule authored in the user interface can be read and modified with the API.
+
+The Object Model
+
+Access begins with the configurationRulesManager property of the Design object. It returns a ConfigurationRulesManager, or null if the design is not a Configured Design. Because rules are stored with the design rather than held in memory, each read is a discrete request, so read what you need into your own variables rather than calling the manager repeatedly. Through the manager you can:
+
+- Read rules — getRules returns every rule in one request; itemById and itemByIds return specific rules.
+
+- Modify rules — modifyRules applies a batch of additions, updates, deletions, and reordering in a single call; addRule and deleteRule are conveniences for the single-rule cases.
+
+- Check rule health — getStatuses reports what the rules engine found the last time the rules ran; getStatusesByRuleId and getStatusesByConfigurationId narrow that to one rule or one configuration. See Rule statuses.
+
+Each rule is a ConfigurationRule with a name, an optional comment, an isActive flag, and a body. The body is an ordered list of typed blocks in two families — statement blocks (the actions a rule performs) and condition blocks (the tests an If block evaluates) — plus the typed values those blocks carry. See Building rule bodies for the full block reference.
+
+In the user interface, these blocks sit inside a Rule block on the Rules Canvas that carries the rule's name and on/off state. In the API that container is the ConfigurationRule object itself — its name, isActive, and body — not a block within the body.
+
+Reads and modifications both return a result that carries an issues array alongside the affected rules. An empty issues array means the operation was applied or read cleanly; entries describe non-fatal problems. Fatal problems are reported as an error instead (see Issues and errors).
+
+Issues and statuses are different things. An issues entry describes what went wrong with the call you just made — a malformed block, an id that matched nothing. A status describes what the rules engine found when the rules last ran, for one rule on one configuration. A call can return no issues at all while a rule is switched off on half the design's configurations, so check both (see Rule statuses).
+
+Configuration rules act on the columns of the configuration table's top table — not on theme tables directly, though a top-table theme column's value is a theme-table row key (see Columns and values).
+
+Getting Started
+
+Before using the API, create and edit some configuration rules through Fusion's user interface so you are familiar with how they behave; this document explains the equivalent functionality in the API. All examples are Python, intended to be run from the Fusion Script Editor (Utilities > Scripts and Add-Ins) with a Configured Design open and active.
+
+Prerequisites
+
+- The active document must be a Configured Design. For a design that is not configured, Design.configurationRulesManager returns null. See the Configurations topic for how to create a Configured Design.
+
+- Reading rules works in any Fusion. Creating, editing, and deleting rules requires the Fusion Design Extension; those operations report an error when the extension is not enabled (in Python, a raised exception).
+
+- Reading statuses also works in any Fusion, and is cheaper than reading rules: the three status queries read data already held in memory, so unlike getRules they make no round trip and never trigger a rules run.
+
+- All operations act on the active design.
+
+- Rules are applied as soon as the call returns — there is no separate step to run or apply them.
+
+The Script Scaffold
+
+Every example in this document runs inside the following scaffold, which connects to the manager and handles fatal errors. Later snippets show only the lines that matter and assume rulesManager, app, ui, and design are in scope from here.
+
+```python
+import adsk.core, adsk.fusion, traceback
+
+def
+run(context):
+    ui = None
+    try:
+        app = adsk.core.Application.get()
+        ui = app.userInterface
+        design: adsk.fusion.Design = app.activeProduct
+
+        # The manager is null for a design that is not a Configured Design.
+        rulesManager = design.configurationRulesManager
+
+        if rulesManager is None:
+            ui.messageBox('The active design is not a Configured Design.')
+            return
+
+        # ---- example code goes here, using `rulesManager` ----
+except:
+        # Fatal problems, such as a missing extension entitlement, arrive here.
+        if ui:
+            ui.messageBox('Failed:{}'.format(traceback.format_exc()))
+```
+
+Reading Rules
+
+All three read methods return the affected rules together with an issues array. Inspect issues even on a read — a non-empty array describes a non-fatal problem, such as a CONVERSION_WARNING encountered while reading a rule back.
+
+- getRules() returns a ConfigurationRulesResult with every rule on the design in evaluation order. Iterate its rules collection rather than indexing the manager.
+
+- itemById(id) returns a ConfigurationRuleResult for a single rule. It reports an error if the id is empty or does not match an existing rule (in Python, a raised exception), so use it when you expect the rule to exist.
+
+- itemByIds(ids) returns a ConfigurationRulesResult for a list of ids. A miss is reported as a RULE_NOT_FOUND entry in issues and is simply absent from rules, rather than being reported as an error — unless none of the requested ids match, in which case the call fails with an error (NO_MATCHING_RULES) instead of returning a result. An empty array returns every rule, like getRules.
+
+```python
+result = rulesManager.getRules()
+app.log(f'The design has {len(result.rules)} configuration rule(s).')
+
+for rule in result.rules:
+    state = 'active' if rule.isActive else 'inactive'
+    app.log(f'  {rule.name} (id={rule.id}, {state})')
+for issue in result.issues:
+    app.log(f'  issue: {issue.code} - {issue.message}')
+```
+
+Each ConfigurationRule exposes its id, name, comment, isActive flag, and body. To work with the blocks in a body, see Building rule bodies.
+
+Modifying Rules
+
+All changes go through modifyRules, which takes a ConfigurationRulesModifyInput built with ConfigurationRulesModifyInput.create(). The input has three optional collections:
+
+- rules — the rules to add or update.
+
+- deleteRuleIds — the ids of rules to delete.
+
+- orderedRuleIds — the desired final order of the rules.
+
+The request is applied in a fixed order — deletes first, then reorder, then adds and updates — but it is not all-or-nothing: a per-rule or per-block problem does not roll back the rest of the batch. If an individual block fails validation, it is replaced with an empty placeholder and a VALIDATION_FAILED issue is recorded, while the rest of the rule and the batch still apply. Always inspect issues after a call. modifyRules returns a ConfigurationRulesResult whose rules collection holds the post-mutation state of the added or updated rules (in input order), which is how you recover the ids assigned to new rules.
+
+Adding
+
+A rule with an empty id is treated as new. Create it with ConfigurationRule.create(), populate it, and add it to the input's rules collection. (See Building rule bodies for populating body.)
+
+```python
+newRule = adsk.fusion.ConfigurationRule.create()
+newRule.name = 'Power requires table'
+newRule.comment = 'Created from the API'
+
+# newRule.body = [ ... ]  # see Building rule bodies
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [newRule]
+
+result = rulesManager.modifyRules(modifyInput)
+
+for rule in result.rules:
+    app.log(f'Added "{rule.name}" with id {rule.id}.')
+
+for issue in result.issues:
+    app.log(f'  issue: {issue.code} - {issue.message}')
+```
+
+Updating
+
+Submit a ConfigurationRule with a non-empty id. The name, comment, and isActive fields are merged individually — you can change one without affecting the others. The body, however, is replaced as a whole: setting body replaces the existing body completely. To change a single block, read the rule, modify its body, and submit the whole rule (see Building rule bodies).
+
+```python
+# Deactivate a rule without touching anything else about it.
+existing = rulesManager.itemById(ruleId).rule
+existing.isActive = False
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [existing]
+rulesManager.modifyRules(modifyInput)
+```
+
+Deleting
+
+List the ids to remove in deleteRuleIds. Deletes run before reorder and add/update. An id that does not match an existing rule is reported as a RULE_NOT_FOUND issue; the remaining ids are still deleted.
+
+```python
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.deleteRuleIds = [ruleId]
+rulesManager.modifyRules(modifyInput)
+```
+
+Reordering
+
+Because rules are evaluated top to bottom, order matters when more than one rule affects the same column. Set orderedRuleIds to the desired final order. When non-empty, it must list exactly one entry for every rule that remains after the delete phase. An empty orderedRuleIds leaves the order unchanged.
+
+```python
+currentIds = [rule.id for rule in rulesManager.getRules().rules]
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.orderedRuleIds = list(reversed(currentIds))  # reverse the current order
+rulesManager.modifyRules(modifyInput)
+```
+
+Convenience Methods
+
+For single-rule cases you can skip building a ConfigurationRulesModifyInput:
+
+- addRule(name) creates one rule with the given name and an empty body, and returns a ConfigurationRuleResult with the new rule and any issues.
+
+- deleteRule(id) deletes one rule and returns True if a rule was deleted, or False if no rule with that id exists.
+
+```python
+added = rulesManager.addRule('Width minimum').rule
+app.log(f'Added rule with id {added.id}.')
+wasDeleted = rulesManager.deleteRule(added.id)
+app.log(f'Deleted: {wasDeleted}')
+```
+
+Use a ConfigurationRulesModifyInput when you need to populate a body before submitting, or to batch several changes together.
+
+Duplicating a Rule and Round-Tripping as JSON
+
+A rule's id identifies an existing rule, so to copy a rule you detach the copy from that id. ConfigurationRule.toJson() returns a JSON string capturing the rule's full state; the static ConfigurationRule.fromJson(ruleJson) parses it back into a detached rule. Call clearId() on the copy so the next submit treats it as new.
+
+clearId() clears the rule id only. Each block in the copied body still carries the blockId of the original rule's block, so submitting the copy as-is records a BLOCK_ID_CONFLICT issue per block while Fusion mints fresh ids. The copy is still created correctly, but clear blockId on the copied blocks to duplicate without those issues (see Block IDs).
+
+```python
+original = rulesManager.itemById(ruleId).rule
+copy = adsk.fusion.ConfigurationRule.fromJson(original.toJson())
+copy.clearId()
+copy.name = original.name + ' (copy)'
+
+# Detach the copied blocks from the original's block ids as well.
+for block in copy.body:
+    block.blockId = ''
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [copy]
+rulesManager.modifyRules(modifyInput)
+```
+
+This example clears the ids on the body's top-level blocks. A body with If blocks nests further blocks inside condition, thenBlocks, elseIfBranches, and elseBlocks; clear those too, or accept the BLOCK_ID_CONFLICT issues and let Fusion mint the ids.
+
+Rule names are disambiguated automatically on submit — a second "Width minimum" becomes "Width minimum 2". JSON is also useful for storing a rule outside the design or exchanging rules with external tooling. Round-tripping preserves blocks this version of the API does not recognize: an unknown block kind is kept as a read-only ConfigurationRuleRawStatement or ConfigurationRuleRawCondition and re-emitted unchanged.
+
+Building Rule Bodies
+
+A rule body is an ordered list of blocks that fall into two families: statement blocks and condition blocks. Each slot in a rule accepts only one family — a rule's body and an If block's branches take statement blocks, while a condition slot takes condition blocks.
+
+Statement blocks are the actions a rule performs. They derive from ConfigurationRuleStatement and are legal in a rule's body and in an If block's thenBlocks and elseBlocks:
+
+- ConfigurationRuleSetBlock — assigns a value to a column (drives or limits it).
+
+- ConfigurationRuleIfBlock — evaluates a condition and runs statements conditionally.
+
+- ConfigurationRuleCommentBlock — documents a section of the body; it does nothing when the rule runs.
+
+Condition blocks are the tests an If block evaluates. They derive from ConfigurationRuleCondition and are legal only as a condition or as the operand of another condition (an If block's condition, an If branch's condition, the left/right of an And/Or block, or the operand of a Not block):
+
+- ConfigurationRuleGetBlock — reads a column and compares it against a value.
+
+- ConfigurationRuleAndBlock / ConfigurationRuleOrBlock — combine two conditions.
+
+- ConfigurationRuleNotBlock — negates a condition.
+
+Both Get and Set blocks carry a value — a subclass of ConfigurationRuleBlockValue — whose class depends on the column's type and the operator; see Columns and values.
+
+Building a Body
+
+Construct every block with the static create factory on its class, set its fields, and assemble the blocks. This example builds if the width is less than 400 mm, set the shelf count to 1. Column ids come from the configuration table — see Columns and values. Both values are expressions, which carry their own units.
+
+```python
+# The condition: width < 400 mm.
+condition = adsk.fusion.ConfigurationRuleGetBlock.create()
+condition.columnId = widthColumnId
+condition.operatorType = adsk.fusion.ConfigurationRuleGetOperators.LessThanConfigurationRuleGetOperator
+condition.value = adsk.fusion.ConfigurationRuleExpressionValue.create('400 mm')
+
+# The action: set the shelf count to 1.
+action = adsk.fusion.ConfigurationRuleSetBlock.create()
+action.columnId = shelfCountColumnId
+action.operatorType = adsk.fusion.ConfigurationRuleSetOperators.EqualsConfigurationRuleSetOperator
+action.value = adsk.fusion.ConfigurationRuleExpressionValue.create('1')
+
+# The If block ties them together.
+ifBlock = adsk.fusion.ConfigurationRuleIfBlock.create()
+ifBlock.condition = condition
+ifBlock.thenBlocks = [action]
+
+rule = adsk.fusion.ConfigurationRule.create()
+rule.name = 'Narrow shelves have one shelf'
+rule.body = [ifBlock]
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [rule]
+rulesManager.modifyRules(modifyInput)
+```
+
+The If Block: Branches and Fallbacks
+
+A ConfigurationRuleIfBlock evaluates its condition and runs thenBlocks when it is true. It also carries:
+
+- elseIfBranches — an ordered list of ConfigurationRuleIfBranch objects, each with its own condition and thenBlocks.
+
+- elseBlocks — statements that run when no condition is true.
+
+Evaluation follows a fixed order: the primary condition, then each branch in elseIfBranches in order; the first true branch runs its thenBlocks and no others; if none is true, elseBlocks runs.
+
+```python
+getOps = adsk.fusion.ConfigurationRuleGetOperators
+setOps = adsk.fusion.ConfigurationRuleSetOperators
+
+def widthLessThan(width):
+    block = adsk.fusion.ConfigurationRuleGetBlock.create()
+    block.columnId = widthColumnId
+    block.operatorType = getOps.LessThanConfigurationRuleGetOperator
+    block.value = adsk.fusion.ConfigurationRuleExpressionValue.create(width)
+    return block
+
+def setShelves(count):
+    block = adsk.fusion.ConfigurationRuleSetBlock.create()
+    block.columnId = shelfCountColumnId
+    block.operatorType = setOps.EqualsConfigurationRuleSetOperator
+    block.value = adsk.fusion.ConfigurationRuleExpressionValue.create(count)
+    return block
+
+ifBlock = adsk.fusion.ConfigurationRuleIfBlock.create()
+ifBlock.condition = widthLessThan('400 mm')
+ifBlock.thenBlocks = [setShelves('1')]
+
+branch = adsk.fusion.ConfigurationRuleIfBranch.create()
+branch.condition = widthLessThan('800 mm')
+branch.thenBlocks = [setShelves('2')]
+ifBlock.elseIfBranches = [branch]
+
+ifBlock.elseBlocks = [setShelves('3')]           # otherwise
+```
+
+Combining conditions with And, Or, and Not
+
+ConfigurationRuleAndBlock is true when both its left and right operands are true; ConfigurationRuleOrBlock is true when either is; ConfigurationRuleNotBlock is true when its operand is false. Operands are themselves condition blocks, so you can nest them to any depth.
+
+```python
+# width >= 400 mm AND height >= 600 mm
+widthOk = adsk.fusion.ConfigurationRuleGetBlock.create()
+widthOk.columnId = widthColumnId
+widthOk.operatorType = getOps.GreaterThanOrEqualConfigurationRuleGetOperator
+widthOk.value = adsk.fusion.ConfigurationRuleExpressionValue.create('400 mm')
+
+heightOk = adsk.fusion.ConfigurationRuleGetBlock.create()
+heightOk.columnId = heightColumnId
+heightOk.operatorType = getOps.GreaterThanOrEqualConfigurationRuleGetOperator
+heightOk.value = adsk.fusion.ConfigurationRuleExpressionValue.create('600 mm')
+
+bothOk = adsk.fusion.ConfigurationRuleAndBlock.create()
+bothOk.left = widthOk
+bothOk.right = heightOk
+```
+
+Reading a Body, Placeholders, and Unrecognized Blocks
+
+When you read a rule, its body contains the same block objects typed as their abstract base classes. Use the cast method on a concrete class to work with a block as its specific type; cast returns None if the block is not of that type, which is how you branch on block kind.
+
+```python
+for block in rulesManager.itemById(ruleId).rule.body:
+    ifBlock = adsk.fusion.ConfigurationRuleIfBlock.cast(block)
+
+if ifBlock is
+not
+None:
+        getBlock = adsk.fusion.ConfigurationRuleGetBlock.cast(ifBlock.condition)
+
+if getBlock is
+not
+None:
+            app.log(f'If block reads column {getBlock.columnId}.')
+
+continue
+    setBlock = adsk.fusion.ConfigurationRuleSetBlock.cast(block)
+
+if setBlock is
+not
+None:
+        app.log(f'Set block writes column {setBlock.columnId}.')
+```
+
+A Get or Set block with no operator, no value, or no columnId is an unconfigured placeholder: it is valid to store but does nothing until completed. A block whose columnId cannot be resolved, or whose operator or value is not valid for the column, is also reduced to a placeholder on submit and records a VALIDATION_FAILED issue. The read-only ConfigurationRuleRawStatement and ConfigurationRuleRawCondition wrappers hold block kinds a newer Fusion produced that this version does not recognize; they round-trip unchanged and are never constructed directly.
+
+Block IDs
+
+Every block carries a blockId — a stable id that identifies it within its rule. It is defined on both family base classes, ConfigurationRuleStatement and ConfigurationRuleCondition, so every statement and every condition has one.
+
+A block you have just created with create() has an empty blockId. Fusion mints one when the rule is submitted and reports it back on the next read, so a body read with getRules or itemById has ids on all of its blocks.
+
+You can also set blockId yourself, and Fusion honours it wherever it does not collide with a block that already exists. On a collision Fusion mints a fresh id instead; the rule still applies, and a BLOCK_ID_CONFLICT issue records that the id you asked for was not the id used. Always read the id back rather than assuming the one you supplied was kept.
+
+Block ids matter because of the round trip. Setting body replaces the body as a whole, so a read-edit-submit cycle rebuilds every block. Carrying each block's existing blockId back through that cycle is what keeps the ids on the blocks you did not change — which in turn is what lets a rule status name the block that raised it (see Rule statuses). Blocks read back from Fusion already carry their ids, so a cycle that edits a body in place preserves them for free.
+
+```python
+# Read, edit one block, and submit. The other blocks keep their ids because the
+# objects read back from Fusion still carry them.
+rule = rulesManager.itemById(ruleId).rule
+
+for block in rule.body:
+    setBlock = adsk.fusion.ConfigurationRuleSetBlock.cast(block)
+    if (setBlock is not None and setBlock.columnId == shelfCountColumnId
+            and setBlock.operatorType == setOps.EqualsConfigurationRuleSetOperator):
+        setBlock.value = adsk.fusion.ConfigurationRuleExpressionValue.create('2')
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [rule]
+result = rulesManager.modifyRules(modifyInput)
+
+# Read the ids back; a BLOCK_ID_CONFLICT means an id you supplied was replaced.
+for block in result.rules[0].body:
+    app.log(f'block {block.blockId}')
+```
+
+Columns and Values
+
+A Get or Set block targets a column of the configuration table by its columnId, which is the id of a ConfigurationColumn. Never invent a columnId — obtain it from the top table (below). A columnId Fusion does not recognize at all, or an operator or value not valid for the column, is reduced to a placeholder with a VALIDATION_FAILED issue. A columnId Fusion recognizes but does not support for rules (see Known limitations) is reduced the same way but reported as COLUMN_NOT_SUPPORTED instead, so you can tell a typo apart from a column that will never work. Neither case raises an error, so always inspect issues after submitting.
+
+Each column has a leaf type that determines the value class a block must carry:
+
+Leaf type | Value class
+
+number | ConfigurationRuleExpressionValue wherever the operator accepts an expression; otherwise ConfigurationRuleNumberValue (or ConfigurationRuleGetRangeValue / ConfigurationRuleSetRangeValue for ranges, or ConfigurationRuleNumberSelectionValue for AnyOf/NoneOf)
+
+text | ConfigurationRuleExpressionValue wherever the operator accepts an expression; otherwise ConfigurationRuleStringValue
+
+boolean | ConfigurationRuleBooleanValue
+
+dropdown / list | ConfigurationRuleStringListValue (a ConfigurationRuleStringValue is accepted on write and reads back as a list)
+
+Finding Column IDs and Their Values
+
+Column ids and the valid values for list columns come from Design.configurationTopTable, not from the rules API. Iterate its columns; every ConfigurationColumn has an id, a title, and a type you can test with isinstance.
+
+```python
+top = design.configurationTopTable
+
+for column in top.columns:
+    columnId = column.id                       # use this as the block's columnId
+
+if isinstance(column, adsk.fusion.ConfigurationParameterColumn):
+        app.log(f'{columnId}: parameter "{column.parameter.name}"')
+
+elif isinstance(column, adsk.fusion.ConfigurationSuppressColumn):
+        app.log(f'{columnId}: suppression of "{column.feature.name}"')
+
+elif isinstance(column, adsk.fusion.ConfigurationVisibilityColumn):
+        app.log(f'{columnId}: visibility of "{column.entity.name}"')
+
+elif isinstance(column, adsk.fusion.ConfigurationInsertColumn):
+        app.log(f'{columnId}: insert of "{column.occurrence.name}"')
+
+elif isinstance(column, adsk.fusion.ConfigurationThemeColumn):
+        app.log(f'{columnId}: theme column')
+```
+
+For a dropdown column (a theme column or an insert column) the value you supply is an option key — the id of a ConfigurationRow in the referenced table, not its display name. Enumerate the referenced table's rows to get the keys:
+
+```python
+for theme in top.customThemeTables:
+
+for i in range(theme.rows.count):
+        row = theme.rows.item(i)
+        app.log(f'  option key {row.id} = "{row.name}"')
+```
+
+The Configuration Name aspect has no physical column; address it with the fixed id "CONFIGURATION_NAME", and its valid values are the top table's row names.
+
+Supported Columns
+
+Column type | Controls | Read | Write | Value class
+
+ConfigurationParameterColumn (numeric) | A numeric parameter | ✅ | ✅ | ConfigurationRuleExpressionValue where the operator accepts one; otherwise ConfigurationRuleNumberValue, or range values for ranges
+
+ConfigurationParameterColumn (text) | A text parameter | ✅ | ✅ (Equals only) | ConfigurationRuleExpressionValue; ConfigurationRuleStringValue for Contains and NotContains
+
+ConfigurationSuppressColumn | Feature/occurrence suppression | ✅ | ✅ | ConfigurationRuleBooleanValue
+
+ConfigurationVisibilityColumn | Entity visibility | ✅ | ✅ | ConfigurationRuleBooleanValue
+
+ConfigurationThemeColumn | Active theme-table row | ✅ | ✅ | ConfigurationRuleStringListValue (option keys)
+
+ConfigurationInsertColumn | Inserted configuration row | ✅ | ✅ | ConfigurationRuleStringListValue (option keys)
+
+Configuration Name ("CONFIGURATION_NAME") | The configuration's name | ✅ | ❌ | ConfigurationRuleStringValue
+
+Joint feature aspects | A joint's configurable aspects | ✅ | ✅ | ConfigurationRuleBooleanValue / ConfigurationRuleStringListValue
+
+Operators by Leaf Type
+
+The operator must be valid for the column's leaf type. Set the Unknown operator to leave a block as an unconfigured placeholder. Each name is a value of ConfigurationRuleGetOperators or ConfigurationRuleSetOperators, suffixed with the operator kind — for example LessThanConfigurationRuleGetOperator and EqualsConfigurationRuleSetOperator.
+
+Leaf type | Get operators | Set operators
+
+number | Equals, NotEquals, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, Range, AnyOf, NoneOf | Equals, Minimum, Maximum, Range, AnyOf
+
+text | Equals, NotEquals, Contains, NotContains | Equals
+
+boolean | Equals, NotEquals | Equals, NotEquals
+
+dropdown / list | Equals, NotEquals | Equals, NotEquals
+
+Value Semantics
+
+- Number values are in Fusion internal units — centimetres for length, radians for angle — not the design's display units. A width of 400 mm is 40.0; an angle of 90° is 1.5708.
+
+- Prefer expressions. Wherever an operator accepts one, write the value as an expression, fixed values included. An expression is written the way you would type it in the Parameters dialog and carries its own units, so a width of 400 mm is 400 mm with no conversion (see Expressions).
+
+- Dropdown values are option keys, not display labels. A dropdown always reads back as a ConfigurationRuleStringListValue, even when a single value was written with a ConfigurationRuleStringValue, so prefer the list form.
+
+- Boolean values follow the aspect's state. For a suppression column, True means the feature is present (not suppressed); for a visibility column, True means visible.
+
+```python
+# Dropdown/theme values take a LIST of option keys, even for a single choice:
+themeValue = adsk.fusion.ConfigurationRuleStringListValue.create([optionKey])
+
+# Boolean values follow the aspect's state:
+suppressValue = adsk.fusion.ConfigurationRuleBooleanValue.create(True)
+```
+
+Expressions
+
+Instead of a fixed number or piece of text, a Get or Set block on a number or text column can carry an expression — a formula such as Length / 2 that Fusion evaluates when the rules run. This lets a rule compare or drive one parameter relative to another, the same way you would build a parameter's value from other parameters in the Parameters dialog. Expressions are carried by a ConfigurationRuleExpressionValue, created with ConfigurationRuleExpressionValue.create(expression); its value property gets and sets the formula string.
+
+Prefer expressions wherever they are accepted, for fixed values as well as formulas: write 400 mm rather than the number 40.0, and 'Oak' rather than the string Oak. An expression states its units, so it needs no conversion to internal units. Use ConfigurationRuleNumberValue and ConfigurationRuleStringValue only with the operators that do not accept an expression.
+
+An expression uses the same syntax as Parameter.expression:
+
+- A literal with units — 400 mm or 6.25 in. A number with no units takes the units of the column's parameter.
+
+- A reference to another parameter, or an equation — Height, Length / 2, Width + 2 * Thickness.
+
+- For text columns, literal text in single quotes, joined with + and combined with functions such as if — 'Hello Fusion' or if (Length < 20 mm; 'Short'; 'Long'). Numeric expressions are written without quotes; only literal text inside an expression is single-quoted. In Python, wrap an expression that contains single quotes in a double-quoted string, as in the examples below.
+
+The result must suit the column: a number column needs an expression that evaluates to a compatible number and unit, while a text column accepts either text or a number. Expressions are accepted only by these operators:
+
+Block | Operators that accept an expression
+
+Get | Equals, NotEquals, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual
+
+Set | Equals
+
+Every other operator takes its literal value class. The one exception is a Get-side Range, whose bounds can be expressions through minExpression and maxExpression on the range value itself (see Ranges).
+
+On the Rules Canvas, an expression appears in a block's value field in place of a number. The rule below drives a minimum shelf count from the cabinet's proportions: when the width is greater than five times the depth plus 100 mm, it sets the minimum number of shelves to 2.
+
+This builds the same rule in code. The Get block compares Width3 against an expression, so the threshold follows Depth in every configuration. The Set block uses Minimum, which takes a literal number rather than an expression.
+
+```python
+# The condition: Width3 > (Depth * 5) + 100 mm, evaluated per configuration.
+isWide = adsk.fusion.ConfigurationRuleGetBlock.create()
+isWide.columnId = width3ColumnId
+isWide.operatorType = getOps.GreaterThanConfigurationRuleGetOperator
+isWide.value = adsk.fusion.ConfigurationRuleExpressionValue.create('(Depth * 5) + 100 mm')
+
+# The action: at least 2 shelves. Minimum takes a number, not an expression.
+minShelves = adsk.fusion.ConfigurationRuleSetBlock.create()
+minShelves.columnId = shelfCountColumnId
+minShelves.operatorType = setOps.MinimumConfigurationRuleSetOperator
+minShelves.value = adsk.fusion.ConfigurationRuleNumberValue.create(2.0)
+
+ifBlock = adsk.fusion.ConfigurationRuleIfBlock.create()
+ifBlock.condition = isWide
+ifBlock.thenBlocks = [minShelves]
+
+rule = adsk.fusion.ConfigurationRule.create()
+rule.name = 'Minimum shelves'
+rule.comment = 'Set minimum shelves based on width'
+rule.body = [ifBlock]
+
+modifyInput = adsk.fusion.ConfigurationRulesModifyInput.create()
+modifyInput.rules = [rule]
+result = rulesManager.modifyRules(modifyInput)
+
+for issue in result.issues:
+    app.log(f'  issue: {issue.code} - {issue.message}')
+```
+
+A Set block with Equals can drive a column from an expression too. On a text column, that lets the value be built from other parameters:
+
+```python
+# Drive a text parameter from the length.
+setLabel = adsk.fusion.ConfigurationRuleSetBlock.create()
+setLabel.columnId = labelColumnId
+setLabel.operatorType = setOps.EqualsConfigurationRuleSetOperator
+setLabel.value = adsk.fusion.ConfigurationRuleExpressionValue.create(
+    "if (Length < 500 mm; 'Short'; 'Long')")
+```
+
+Expressions are checked when you submit. Fusion validates each expression against the design's current parameters when modifyRules runs. The Configuration Rules API has no call to check a rule expression in advance. UnitsManager.isValidExpression can catch syntax and unit errors beforehand, but only submitting the rule gives the definitive result, so always inspect issues. A block whose expression fails is reduced to a placeholder with a VALIDATION_FAILED issue, and the rest of the rule still applies. The issue's message names the reason, for example:
+
+Reason in the message | Cause
+
+emptyExpression | The expression string is empty or contains only spaces. create('') is accepted, but the block is rejected on submit.
+
+parseError | The expression is not valid syntax.
+
+variableNotFound | The expression names a parameter the design does not have.
+
+unitMismatch | The result does not suit the column — for example, a length expression on an angle column, or text on a number column.
+
+sameVariableUsed | The expression refers to the column's own parameter, such as Width * 2 on the Width column.
+
+An expression on an operator that does not accept one, or on a boolean or dropdown column, is reported as VALIDATION_FAILED in the same way. Treat these reasons as diagnostic text rather than a fixed list to branch on.
+
+Expressions are evaluated when the rules run. A valid expression is evaluated separately for each configuration, using that configuration's parameter values. If it cannot be evaluated for a configuration — for example, it divides by a parameter that is zero there — the rule reports an ERR_EXPRESSION_INVALID status for that configuration rather than an issue on your call (see Rule statuses).
+
+Read the expression back rather than assuming it is the text you wrote. Fusion stores each expression in a standard form, so the value you read back can differ from what you submitted in spacing, number formatting, or units while meaning the same thing. Compare expressions by what they mean — for example, by checking for the parameter names they reference — rather than by exact string.
+
+A literal value can read back as an expression. On a number or text column with an operator that accepts expressions, Fusion stores a plain ConfigurationRuleNumberValue or ConfigurationRuleStringValue as an expression too, so the block reads back with a ConfigurationRuleExpressionValue — a number comes back as an equivalent expression with units, and the text Oak as the text expression 'Oak'. Code that reads values should check for an expression as well as for the literal class:
+
+```python
+getBlock = adsk.fusion.ConfigurationRuleGetBlock.cast(ifBlock.condition)
+
+if getBlock is not None:
+    expression = adsk.fusion.ConfigurationRuleExpressionValue.cast(getBlock.value)
+    if expression is not None:
+        app.log(f'Compares against the expression {expression.value}')
+    else:
+        number = adsk.fusion.ConfigurationRuleNumberValue.cast(getBlock.value)
+        if number is not None:
+            app.log(f'Compares against {number.value} (internal units)')
+```
+
+Ranges
+
+On a Get block, the Range operator tests whether the column's current value falls within [min, max]. Use a ConfigurationRuleGetRangeValue, and prefer expressions for its bounds: create the range with both bounds unset, then set minExpression and maxExpression. A bound that is not set is open on that side.
+
+```python
+# True when the width is between 400 mm and 900 mm, inclusive.
+inRange = adsk.fusion.ConfigurationRuleGetBlock.create()
+inRange.columnId = widthColumnId
+inRange.operatorType = getOps.RangeConfigurationRuleGetOperator
+bounds = adsk.fusion.ConfigurationRuleGetRangeValue.create(False, 0.0, False, 0.0)
+bounds.minExpression = '400 mm'
+bounds.maxExpression = '900 mm'
+inRange.value = bounds
+```
+
+create(hasMin, min, hasMax, max) takes only numbers, which is why the expressions are assigned afterwards through the range value's minExpression and maxExpression properties. Each bound is either a number or an expression, never both; setting one replaces the other:
+
+- Setting minExpression to a non-empty string also sets hasMin to True and resets min to 0.0. While an expression is the bound, min always reads 0.0 — it does not hold the evaluated result.
+
+- Setting min clears minExpression, sets hasMin to True, and keeps the number you set.
+
+- Setting hasMin to False clears both, leaving the range open below.
+
+- An empty minExpression means "no expression", not an empty expression, so it is never rejected. Setting it to empty leaves min and hasMin as they are, so clearing an expression you set leaves a numeric lower bound of 0.0; set hasMin to False to open the range instead.
+
+maxExpression, max, and hasMax behave the same way.
+
+```python
+# True when the width is between half the length and 900 mm, inclusive.
+bounds = adsk.fusion.ConfigurationRuleGetRangeValue.create(False, 0.0, False, 0.0)
+bounds.minExpression = 'Length / 2'    # hasMin becomes True; min stays 0.0
+bounds.maxExpression = '900 mm'
+
+inRange = adsk.fusion.ConfigurationRuleGetBlock.create()
+inRange.columnId = widthColumnId
+inRange.operatorType = getOps.RangeConfigurationRuleGetOperator
+inRange.value = bounds
+```
+
+When you read a range back, a bound you submitted as a number may be reported as an equivalent expression, with minExpression populated and min reading 0.0. Test which form a bound is in rather than assuming the form you wrote:
+
+```python
+bounds = adsk.fusion.ConfigurationRuleGetRangeValue.cast(getBlock.value)
+
+if bounds is not None and bounds.hasMin:
+    if bounds.minExpression:
+        app.log(f'Lower bound is the expression {bounds.minExpression}')
+    else:
+        app.log(f'Lower bound is {bounds.min} (internal units)')
+```
+
+On a Set block, the Range operator constrains the column with a lower bound, an upper bound, an increment, or any combination. Use ConfigurationRuleSetRangeValue.create(hasMin, min, hasMax, max, hasIncrement, increment). Each of the three parts — min, max, and increment — is independently optional, and at least one must be set. Only the parts you set take effect: min is the lowest value the user can choose, max the highest, and increment the step between the allowed values in between. When both min and max are set, min must not be greater than max.
+
+```python
+# Constrain the width to 400-900 mm in 5 mm steps.
+fullRange = adsk.fusion.ConfigurationRuleSetBlock.create()
+fullRange.columnId = widthColumnId
+fullRange.operatorType = setOps.RangeConfigurationRuleSetOperator
+fullRange.value = adsk.fusion.ConfigurationRuleSetRangeValue.create(True, 40.0, True, 90.0, True, 0.5)
+```
+
+A Set block can also use Minimum and Maximum with a plain ConfigurationRuleNumberValue, but a Range expresses the same intent in one block and can carry an increment, so prefer Range. Do not use a get-range value on a Set block or a set-range value on a Get block — the two classes differ (only the set range has an increment), and each belongs with its own operator.
+
+AnyOf and NoneOf
+
+Where Range tests or constrains a span of numbers, AnyOf and NoneOf test or constrain a number column against a discrete set of candidate values. On a Get block, AnyOf is true when the column's current value equals one of the selected entries; NoneOf is true when it equals none of them. On a Set block, AnyOf limits the column to the selected entries — there is no set-side NoneOf; use AnyOf whenever a Set block needs to offer a discrete list of numbers.
+
+Both operators carry a ConfigurationRuleNumberSelectionValue, built from an array of ConfigurationRuleNumberSelectionEntry objects assigned to its entries property. Each entry pairs a numeric value (Fusion internal units) with its own isSelected flag, so an entry can be carried in the block without being part of the current selection. At least one entry must be selected; an all-false selection is rejected.
+
+```python
+# True when the width is 400 mm, 600 mm, or 900 mm.
+anyOf = adsk.fusion.ConfigurationRuleGetBlock.create()
+anyOf.columnId = widthColumnId
+anyOf.operatorType = getOps.AnyOfConfigurationRuleGetOperator
+anyOf.value = adsk.fusion.ConfigurationRuleNumberSelectionValue.create()
+anyOf.value.entries = [
+    adsk.fusion.ConfigurationRuleNumberSelectionEntry.create(40.0, True),
+    adsk.fusion.ConfigurationRuleNumberSelectionEntry.create(60.0, True),
+    adsk.fusion.ConfigurationRuleNumberSelectionEntry.create(90.0, True),
+]
+```
+
+NoneOf reads the same way with NoneOfConfigurationRuleGetOperator; to limit a Set block to the same kind of candidate list, use AnyOfConfigurationRuleSetOperator with a ConfigurationRuleNumberSelectionValue built the same way.
+
+Known Limitations
+
+The supported-columns table above lists what a rule can read and write today. A few limitations are worth calling out:
+
+- Unsupported columns are flagged distinctly. Targeting one of the columns below — a column Fusion recognizes but does not support for rules — is reported as a COLUMN_NOT_SUPPORTED issue rather than the generic VALIDATION_FAILED, so you can tell "this will never work" apart from a typo'd or otherwise unrecognized id (see Issues and errors).
+
+- Property columns (ConfigurationPropertyColumn) cannot be read or written.
+
+- Boolean parameter columns are not yet supported.
+
+- Of the feature-aspect columns, only joint aspects are exposed (for both read and write); thread and hole feature-aspect columns cannot be targeted by a rule.
+
+- Configuration Name is read-only — it can be a Get target but not a Set target.
+
+- Text columns can only be set with  Equals; Contains and NotContains exist only on Get blocks. Set NotEquals is valid only on boolean and dropdown columns.
+
+- NoneOf has no Set-side counterpart — it exists only as a Get operator on number columns; use AnyOf to constrain a Set block to a candidate list.
+
+- Expressions are limited to number and text parameter columns and to the operators listed in Expressions; of the range values, only ConfigurationRuleGetRangeValue has expression bounds. Only submitting a rule fully validates its expressions — inspect issues afterwards.
+
+Issues and Errors
+
+This section covers problems with the call you just made. For what the rules engine found when the rules last ran, see Rule statuses.
+
+The API distinguishes two kinds of problem: non-fatal problems, reported as issues on the returned result, and fatal problems, reported as errors. An operation can succeed overall while a part of it silently degrades, so understanding the difference matters.
+
+Non-fatal problems become issues. When a single block or rule in a request has a problem, the API records an issue and continues: the offending block is reduced to an empty placeholder and the rest of the rule and the batch still apply. The batch is not rolled back. Inspect the issues collection after every call, including reads and apparently successful writes.
+
+Fatal problems are reported as an error. An invalid request shape, an uninitialised rules pipeline, or a missing extension entitlement on a write is reported as an error rather than returning a result. In Python the error is raised as an exception (a RuntimeError), so wrap calls in try/except; in C++ the call does not throw — retrieve the error with Application::getLastError.
+
+The issue Object and Codes
+
+Every issue is a ConfigurationRulesIssue with a code, a message (developer-facing, not localized), a ruleId, a columnId, a path (such as rules[0].body[2]), and a ruleIndex guarded by hasRuleIndex. To correlate an issue back to a rule in your request, use ruleIndex (when hasRuleIndex is True) rather than parsing path.
+
+Code | Meaning
+
+VALIDATION_FAILED | A Get or Set block did not pass validation and was replaced with a placeholder — e.g. a columnId Fusion does not recognize at all, an operator/value not valid for the column, or an expression that is empty or invalid (see Expressions).
+
+COLUMN_NOT_SUPPORTED | A Get or Set block targeted a columnId that Fusion recognizes but does not support for rules (see Known limitations) — distinct from VALIDATION_FAILED, which covers columns Fusion does not recognize at all. The block is replaced with a placeholder the same way.
+
+RULE_NOT_FOUND | An id in deleteRuleIds, or requested through itemByIds, did not match an existing rule.
+
+DELETE_FAILED | A rule could not be deleted.
+
+CREATE_FAILED | A new rule could not be created.
+
+CONVERSION_WARNING | A non-fatal problem occurred while reading a rule back.
+
+EXTENSION_REQUIRED | A write was attempted without the Fusion Design Extension.
+
+BLOCK_ID_CONFLICT | A blockId you supplied was already in use by a block outside the rule being written, so Fusion minted a fresh id instead. The rule still applies; read the ids back (see Block IDs).
+
+BLOCK_ID_NOT_PRESERVED | A blockId you supplied did not end up on the rebuilt block. The rule still applies; read the ids back.
+
+Treat any code you do not recognize as an opaque string — future versions may add more.
+
+```python
+result = rulesManager.modifyRules(modifyInput)
+
+if
+not result.issues:
+    app.log('Applied cleanly.')
+
+for issue in result.issues:
+    location = f'rule {issue.ruleIndex}'
+if issue.hasRuleIndex else
+'request'
+    app.log(f'{issue.code} at {location} (column "{issue.columnId}"): {issue.message}')
+```
+
+Rule Statuses
+
+A status is what the configuration rules engine found the last time the rules ran, for one rule on one configuration. A rule that fails on four configurations produces four statuses. These are the same errors, warnings, and information the Configuration Rules panel shows against the blocks on the Rules Canvas.
+
+Only problems are reported. A rule that applied cleanly to a configuration reports nothing for it, so the absence of statuses is the signal that all is well.
+
+Statuses answer a different question from issues, and you generally need both:
+
+| Issues | Statuses
+
+Answers | What went wrong with the call I just made? | What did the engine find when the rules last ran?
+
+Where | The issues array on the result of the call | The three getStatuses methods
+
+Scope | The request, or a rule or block in it | One rule on one configuration
+
+Message | Developer-facing, not localized | Localized, ready to display to a user
+
+A modifyRules call can return no issues at all while a rule is switched off on half the design's configurations. Statuses exist only once the rules have run, so a design whose rules have never run returns an empty result — that is not an error.
+
+The Three Queries
+
+All three are read-only, need no Fusion Design Extension, and never trigger a rules run. Each returns a ConfigurationRuleStatusesResult.
+
+Method | Answers | Returns null when
+
+getStatuses() | Everything the engine holds, design-wide | Never — it always returns a result
+
+getStatusesByRuleId(ruleId) | Is this rule healthy? | ruleId names no rule the engine is running
+
+getStatusesByConfigurationId(configurationId) | Is this configuration healthy? | configurationId does not match a row on the design's top configuration table
+
+On the two filtered queries, null and an empty result mean opposite things. An empty statuses array means the subject was found and nothing is wrong — that is the success case. null means there is no such subject. Check for null first: a script that goes straight to result.errorCount == 0 reads a typo'd id as a clean bill of health. Both filtered methods report an error if the id is empty (in Python, a raised exception).
+
+getStatusesByRuleId returns null for an inactive rule as well as an unknown or deleted one, because an inactive rule is excluded from the engine's rule set. Use itemById to tell them apart: it returns the rule when it exists, and ConfigurationRule.isActive then says whether the rule is merely switched off.
+
+The Result Object
+
+A ConfigurationRuleStatusesResult holds the matching statuses, in no guaranteed order, plus errorCount, warningCount, and infoCount. The counts are scoped to the query, so getStatusesByRuleId(ruleId).errorCount is the error count for that one rule. They always sum to the length of statuses, so a health check needs no iteration at all.
+
+A result is a point-in-time snapshot. It does not update when the rules run again or when the design changes — call the query again for current statuses.
+
+The Status Object
+
+Property | Description
+
+severity | A ConfigurationRuleStatusSeverities value. Use this for triage rather than inspecting code.
+
+code | The kind of status, such as ERR_CONSTRAIN. Use this to branch on a specific condition.
+
+message | The localized, human-readable description, ready to display. This is the same text the Configuration Rules panel shows.
+
+ruleId | The rule this status belongs to. Matches ConfigurationRule.id, so the rule can be fetched with itemById.
+
+configurationId | The configuration this status applies to. Matches ConfigurationRow.id on Design.configurationTopTable. Empty when the status is not scoped to a single configuration.
+
+blockId | The block within the rule that raised the status. Matches blockId on a block in the rule's body (see Block IDs). Empty when the status describes the rule as a whole, which is normal, or when the rule's blocks have no ids yet.
+
+Severity
+
+Severity tells you what happened to the rule on the affected configuration. The Error row is the one that matters most: an error does not mean the rule applied and something looked odd, it means the rule is not running there at all.
+
+Value of ConfigurationRuleStatusSeverities | Was the rule applied? | What it means
+
+InformationConfigurationRuleStatusSeverity | Yes | The configuration is correct as generated. The message is best-practice advice about how the rule is authored or how it applied.
+
+WarningConfigurationRuleStatusSeverity | Yes, but it may produce unpredictable results | Review the message and confirm the configuration is what you intended.
+
+ErrorConfigurationRuleStatusSeverity | No | The rule has been turned off for that configuration until the error is resolved. The configuration does not reflect the rule at all, and will not until the reported problem is fixed.
+
+A configuration with no error statuses for a rule had that rule applied to it.
+
+Status Codes
+
+Branch on severity for general triage and on code only when you need a specific condition. Treat any code you do not recognize as an opaque string — future versions may add more.
+
+Code | Severity | Meaning
+
+ERR_CONSTRAIN | Error | The aspect is already constrained by another rule or block with a conflicting value, so this rule could not constrain it.
+
+ERR_EXPRESSION_INVALID | Error | An expression — in a parameter, or in one of the rule's blocks — could not be evaluated for the affected configuration (see Expressions).
+
+ERR_INVALID_INPUT | Error | The block is missing data it requires. Rebuild the block, and contact Autodesk Support if it recurs.
+
+ERR_UNHANDLED | Error | The block hit an error Fusion could not classify. Contact Autodesk Support.
+
+WARN_CUSTOM_CONSTRAIN | Warning | A non-custom aspect is driven by a custom aspect, so only parent-row values change.
+
+WARN_SNAP_CONSTRAIN | Warning | Both joint snaps point to the same component, which a joint does not allow.
+
+WARN_INCOMPLETE | Warning | The block is an unconfigured placeholder, so it is ignored when the rule runs.
+
+INFO_CONSTRAIN | Information | Another block also constrains the aspect, so only the values common to both are valid.
+
+INFO_SNAP_CONSTRAIN | Information | A joint snap list contains an invalid option; the last valid snap is selected.
+
+INFO_CYCLE | Information | The same aspect is referenced in a Get block and a Set block, which may create a cycle and produce unstable results (see Avoiding cycles).
+
+Reading Every Status
+
+```python
+severities = adsk.fusion.ConfigurationRuleStatusSeverities
+labels = {
+    severities.ErrorConfigurationRuleStatusSeverity: 'ERROR',
+    severities.WarningConfigurationRuleStatusSeverity: 'WARNING',
+    severities.InformationConfigurationRuleStatusSeverity: 'INFO',
+}
+
+result = rulesManager.getStatuses()
+app.log(f'{result.errorCount} error(s), {result.warningCount} warning(s), '
+        f'{result.infoCount} information.')
+
+for status in result.statuses:
+    # blockId is empty when the status describes the rule as a whole.
+    block = status.blockId or '-'
+    app.log(f'[{labels[status.severity]}] {status.code} rule={status.ruleId} '
+            f'configuration={status.configurationId} block={block}: {status.message}')
+```
+
+Checking One Rule
+
+A non-null result with a zero errorCount means the rule is active and was applied to every configuration.
+
+```python
+health = rulesManager.getStatusesByRuleId(ruleId)
+
+if health is None:
+    # Not a rule the engine is running. itemById separates a deleted rule, where it
+    # reports an error, from an inactive one, where it returns the rule.
+    try:
+        rule = rulesManager.itemById(ruleId).rule
+        app.log(f'"{rule.name}" is inactive, so it is not evaluated.')
+    except RuntimeError:
+        app.log('No rule with that id exists.')
+elif health.errorCount == 0:
+    app.log('Applied to every configuration.')
+else:
+    app.log(f'Turned off on {health.errorCount} configuration(s).')
+```
+
+Checking One Configuration
+
+Configuration ids are ConfigurationRow.id values from Design.configurationTopTable. The result also carries every status that names no configuration at all — a rule with an unfilled socket is a problem for this configuration too — so it may contain entries whose configurationId is empty rather than the id you asked for.
+
+```python
+rows = design.configurationTopTable.rows
+
+for i in range(rows.count):
+    row = rows.item(i)
+    health = rulesManager.getStatusesByConfigurationId(row.id)
+
+    if health is None:
+        app.log(f'{row.name}: not a row on the top configuration table.')
+    elif health.errorCount == 0:
+        app.log(f'{row.name}: reflects every rule.')
+    else:
+        app.log(f'{row.name}: {health.errorCount} rule(s) turned off.')
+        for status in health.statuses:
+            app.log(f'    {status.code}: {status.message}')
+```
+
+Finding the Block That Raised a Status
+
+When blockId is not empty, it names a block in the rule's body. Read the rule with itemById and walk the body to find it — remembering that an If block nests further blocks in its condition, thenBlocks, elseIfBranches, and elseBlocks. The example below descends through If blocks; extend it through the left, right, and operand of And, Or, and Not blocks if your rules nest conditions.
+
+```python
+def findBlock(blocks, blockId):
+    """Depth-first search of a statement list for the block with the given id."""
+    for block in blocks:
+        if block.blockId == blockId:
+            return block
+
+        ifBlock = adsk.fusion.ConfigurationRuleIfBlock.cast(block)
+        if ifBlock is None:
+            continue
+
+        # Everything an If block can nest: its own condition and then-branch, each
+        # else-if branch's condition and then-branch, and the else branch.
+        nested = list(ifBlock.thenBlocks) + list(ifBlock.elseBlocks)
+        if ifBlock.condition is not None:
+            nested.append(ifBlock.condition)
+        for branch in ifBlock.elseIfBranches:
+            nested += list(branch.thenBlocks)
+            if branch.condition is not None:
+                nested.append(branch.condition)
+
+        found = findBlock(nested, blockId)
+        if found is not None:
+            return found
+
+    return None
+
+for status in rulesManager.getStatuses().statuses:
+    if not status.blockId:
+        continue    # Describes the rule as a whole rather than one block.
+
+    rule = rulesManager.itemById(status.ruleId).rule
+    block = findBlock(rule.body, status.blockId)
+    if block is not None:
+        app.log(f'{status.code} raised by {block.objectType} in "{rule.name}".')
+```
+
+Best Practices
+
+Writing clear rules
+
+- One concern per rule. Keep each rule focused on a single constraint, such as "power option requires a table." Single-purpose rules are easier to read, reorder, and toggle while troubleshooting.
+
+- Name rules clearly. Prefer short constraint phrasing ("Width minimum 400 mm") over generic names. Duplicate names are disambiguated automatically on submit.
+
+- Use comments for intent. Set the rule's comment, and use ConfigurationRuleCommentBlock entries to document sections of a body.
+
+- Prefer expressions. Wherever an operator accepts an expression, use one — fixed values included — rather than a number or string value (see Expressions).
+
+- Complete every block. A Get or Set block with no operator, value, or columnId is ignored when the rule runs; inspect issues to find placeholders.
+
+- Keep logic flat. Prefer one If with elseIfBranches over nested If blocks, and prefer a Range or a multi-value ConfigurationRuleStringListValue over nested And/Or blocks — a range for a span of numbers, a multi-entry list to accept several dropdown options.
+
+Ordering and Evaluation
+
+Rules are evaluated top to bottom, and the statements within a rule run in order. When more than one rule or block affects the same column, order determines the outcome, so use orderedRuleIds to control it deliberately. When multiple Set blocks limit the same column under the same condition, the result is the intersection of their value lists — you can narrow a list this way but not widen it. If two rules leave no value in common, the configuration has no valid value for that aspect, which is an error; lead with the least restrictive condition and review rules that constrain the same aspect.
+
+Avoiding Cycles
+
+A rule can both read and write the configuration, but avoid cycles that never settle. A cycle arises when rules read and write each other's columns in a loop — for example, Rule 1 sets Width from Length while Rule 2 sets Length from Width — so the values oscillate rather than settle. Avoid reading and writing the same column within one rule unless the write immediately satisfies the read, and structure rules so their conditions read from different columns than the ones they set.
+
+Expressions can create the same kind of loop less visibly, because the parameters an expression references are reads too. Setting Width to Length / 2 in one rule while another rule sets Length from Width is a cycle, even though neither Get block mentions the other column. Fusion accepts such rules when you submit them — only an expression that refers to its own column is rejected — and the INFO_CYCLE status does not flag them either, because it only compares the columns of Get and Set blocks. Review the parameters your expressions reference as carefully as the columns your conditions read.
+
+See also
+
+- Configurations — creating a Configured Design and working with the configuration table using the API.
+
+- Configuration Rules (product help) — Authoring rules on the Rules Canvas, block reference, and best practices in the user interface.
+
+---

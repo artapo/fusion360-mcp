@@ -11,15 +11,15 @@ antes da ~2705.
 
 | Arquivo | O que tem | Quando abrir |
 |---|---|---|
-| `guides.md` | 9 guias conceituais completos do User's Manual | Quando precisa do **como fazer** de um assunto |
-| `api-index.md` | 1106 classes com a URL da página oficial de cada uma | Quando quer a **documentação em prosa** e os exemplos de uma classe |
+| `guides.md` | 15 guias conceituais completos do User's Manual | Quando precisa do **como fazer** de um assunto |
+| `api-index.md` | 1981 classes e enums com a URL da página oficial de cada uma | Quando quer a **documentação em prosa** e os exemplos de uma classe |
 
 ## api-index.md — a prosa oficial de uma classe
 
 Substituído por `api()` e pelos stubs no uso diário. Vale quando o que falta
 é a explicação e o exemplo, não a assinatura.
 
-Não leia o arquivo inteiro (212 KB). Faça grep:
+Não leia o arquivo inteiro (~235 KB). Faça grep:
 
 ```bash
 grep -i "extrudefeature" api-index.md
@@ -51,6 +51,10 @@ Seções disponíveis:
 - **Commands** / **Command Inputs** — criar comandos com diálogo próprio
 - **Working in a Separate Thread** — a regra que sustenta o bridge MCP:
   nenhuma chamada de API fora da main thread, comunicação por custom event
+- **Sheet Metal API** (5 partes: Introduction, Overview, Rules and
+  Conversion, Features, Flat Patterns) — regras, flanges, overrides, unfold,
+  flat pattern
+- **Configuration Rules** — ler e editar regras de designs configurados
 
 ```bash
 grep -n "^## " guides.md          # listar seções
@@ -61,12 +65,15 @@ sed -n '/^## Attributes/,/^---/p' guides.md
 
 Ambos vêm de `help.autodesk.com`. Se o Fusion atualizar e algo parecer
 defasado, peça ao Claude para regerar — o `api-index.md` sai do
-`toctree.json` oficial (`/view/fusion360/ENU/data/toctree.json`) e o
-`guides.md` das páginas `/cloudhelp/ENU/Fusion-360-API/files/*_UM.htm`.
+`toctree.json` oficial (`/view/fusion360/ENU/data/toctree.json`), ordenado
+por prefixo do módulo e depois pelo título, e o `guides.md` das páginas
+`/cloudhelp/ENU/Fusion-360-API/files/*_UM.htm`. O que mudou em cada release
+está em `/cloudhelp/ENU/Fusion-360-API/files/WhatsNew.htm` (a página só traz
+a release mais recente). Última regeração: API de outubro de 2026.
 
 ## O que NÃO está aqui
 
-O texto detalhado de cada uma das 1106 classes — são páginas demais para
+O texto detalhado de cada uma das 1981 classes — são páginas demais para
 espelhar. O índice dá o nome e a URL; o detalhe vem por WebFetch na hora.
 
 Assinaturas exatas não estão aqui de propósito: elas vêm de `api(obj)` e dos
