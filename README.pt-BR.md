@@ -20,7 +20,7 @@ result = snapshot()
 As mais recentes vêm primeiro. Para atualizar, feche o Fusion e rode
 `uvx fusion360-mcp@latest install`, que substitui o add-in e a skill.
 
-### Próxima versão (ainda não publicada no PyPI)
+### 0.1.3 (18/11/2026)
 
 - **API do Fusion de outubro de 2026 (2706).** A skill passou a cobrir o que
   mudou: membros aposentados, removidos e renomeados, com seus substitutos;
