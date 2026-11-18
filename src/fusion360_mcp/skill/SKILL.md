@@ -825,32 +825,37 @@ On a Fusion older than 2706, only the left column exists. `api()` settles it.
 
 ## Sheet metal: rules and overrides
 
-*From the official Sheet Metal guides (in `references/guides.md`), not yet
-verified through `fusion_eval`. Replace this line with real output once it
-is.*
+*Verified through `fusion_eval` on Fusion 2706.1.17, except the Personal Use
+line, which comes from the official guides.*
 
 - **A rule cannot be created from scratch.** Copy one with
   `design.designSheetMetalRules.addByCopy(rule, name)` and edit the copy.
-  `designSheetMetalRules` is empty until the design has sheet metal, so in a
-  new design you assign a **library** rule to `C.activeSheetMetalRule`,
-  create the first feature, and only then copy rules into the design.
-- `rule.thickness.value` / `bendRadius.value` are in **cm**: `0.2` is 2 mm.
-  Setting `.expression = '2 mm'` avoids the conversion. `kFactor` is a plain
-  float, not a `SheetMetalRuleValue`.
+  In a design with no sheet metal yet, `designSheetMetalRules` is not empty:
+  even `.count` raises `RuntimeError: InternalValidationError : smDataRoot`.
+  So assign a **library** rule (`design.librarySheetMetalRules`, e.g.
+  `'Steel (mm)'`) to `C.activeSheetMetalRule`, create the first feature, and
+  only then copy rules into the design.
+- `rule.thickness.value` / `bendRadius.value` are in **cm**: `0.25` is 2.5 mm.
+  Setting `.expression = '1.5 mm'` avoids the conversion. `bendRadius` can be
+  an expression such as `'Thickness'`. `kFactor` is a plain float.
 - Edge flange per-edge width: edges passed to `createEdgeFlangeInput` are
   full-length and cannot be changed later. For other widths, pass `[]` and add
   them through `inp.edgeDefinitions.addSymmetricEdge(...)` and its siblings.
-  A symmetric width of 5 mm gives a **10 mm** wide flange (it is per side).
+  A symmetric width of 5 mm gives a **10 mm** wide flange (it is per side);
+  the bend reliefs add their own width beyond that.
 - `ContourFlangeInput.setSymmetricDirection(ValueInput)` replaces the distance
   and applies to *each side*: 10 mm gives a 20 mm flange.
 - Hem setters take only `StartEdgeBendPositionType` or
-  `TangentToSideBendPositionType`. `InsideBendPositionType` is for edge flanges.
+  `TangentToSideBendPositionType`. `InsideBendPositionType` raises
+  `Invalid bendPositionType argument`; it is for edge flanges.
 - An unfold needs `isUnfoldAllBends = True` or a list of `bendFaces`. With
-  neither, `add` fails.
+  neither, `add` raises `At least one bend face must be specified...`.
 - **Overrides** (`bendRadiusOverride`, `bendReliefOverride`,
-  `two/threeBendCornerOverride`): not every feature has every one, and base
-  flanges have none (they return `None`). To edit one on an existing feature,
-  roll the marker to just before it first:
+  `two/threeBendCornerOverride`): not every feature has every one. On a base
+  flange, merely *reading* one raises `Base flanges do not support sheet
+  metal rule overrides`. Until an override is set, `.bendRadius` is `None`.
+  To set one on an existing feature, roll the marker to just before it, or
+  it raises `Didn't roll editing feature back.`:
 
   ```python
   f.timelineObject.rollTo(True)
@@ -865,8 +870,9 @@ is.*
 
 ## Configuration rules
 
-*From the official Configuration Rules guide (in `references/guides.md`), not
-yet verified through `fusion_eval`.*
+*From the official Configuration Rules guide (in `references/guides.md`).
+Only the first bullet is verified through `fusion_eval`; the rest needs a
+configured design.*
 
 - `design.configurationRulesManager` is `None` unless the design is a
   Configured Design. Check it before doing anything else.
