@@ -15,6 +15,50 @@ result = snapshot()
 #   esfera x7                  2.572 mm3  1.7x1.7x1.7  faces:1
 ```
 
+## Novidades
+
+As mais recentes vêm primeiro. Para atualizar, feche o Fusion e rode
+`uvx fusion360-mcp@latest install`, que substitui o add-in e a skill.
+
+### Próxima versão (ainda não publicada no PyPI)
+
+- **API do Fusion de outubro de 2026 (2706).** A skill passou a cobrir o que
+  mudou: membros aposentados, removidos e renomeados, com seus substitutos;
+  regras e overrides de sheet metal; configuration rules; os membros novos de
+  `View` nas drawings; e a criação de drawings por código. As notas de sheet
+  metal e de drawings foram conferidas num Fusion 2706 em execução.
+- O índice da API foi gerado de novo a partir da documentação da Autodesk
+  (1981 classes e enums, contra 1832 antes), e os guias oficiais de Sheet
+  Metal e de Configuration Rules entraram nas referências da skill.
+- O `snapshot()` agora lista os corpos de malha, com tamanho, número de
+  triângulos e se estão ocultos. Antes, um STL importado não aparecia nele.
+- Skill: em qual componente uma flange de chapa vai parar ([#14](https://github.com/artapo/fusion360-mcp/pull/14)) e como o
+  `addExistingComponent` combina a matriz com a da primeira ocorrência ([#15](https://github.com/artapo/fusion360-mcp/pull/15)).
+
+### 0.1.2 (08/11/2026)
+
+- O rollback age no documento que a chamada alterou, funciona com o marcador
+  no meio da timeline e não quebra mais quando a chamada fecha o documento em
+  que começou.
+- Skill: armadilhas da API de drawings e quatro notas enviadas por
+  [ArnaudUnreal](https://github.com/ArnaudUnreal): o sentido da extrusão em
+  cada plano de origem, cotas a partir do ponto de origem, como fazer a
+  quantidade de features seguir um parâmetro e o proxy faltando que aparece
+  como "Invalid entity".
+
+### 0.1.1 (04/09/2026)
+
+- Corrigidos o rollback e o undo, inclusive o rollback em documento vazio.
+- Novo auxiliar `api()`, que lista os métodos e as assinaturas de um objeto.
+- Skill: orientação dos planos de sketch, `participantBodies`, nomes
+  acentuados e aparências.
+
+### 0.1.0 (04/09/2026)
+
+- Primeira versão, com o servidor MCP, o add-in do Fusion, `snapshot()`,
+  `screenshot()`, `undo()` com rollback automático, a skill `fusion360-api` e
+  o instalador via `uvx`.
+
 ## Instalação
 
 ```bash
@@ -70,7 +114,7 @@ local poderia executar Python na sua sessão do Fusion.
 ## A ferramenta
 
 `fusion_eval` recebe código Python e devolve o que estiver em `result`.
-`adsk`, `app`, `ui`, `design` e `root` já vêm ligados, além de três
+`adsk`, `app`, `ui`, `design` e `root` já vêm ligados, além de quatro
 auxiliares:
 
 | | |
@@ -78,6 +122,7 @@ auxiliares:
 | `snapshot()` | Estado do modelo em texto compacto. Corpos idênticos são reduzidos a uma linha só, de modo que um padrão de 50 instâncias custa o mesmo que um corpo. |
 | `screenshot(w, h, view)` | Renderiza o viewport e devolve a imagem na própria resposta. Custa caro (~10k tokens); prefira `snapshot()` quando o que importa são os números. |
 | `undo()` | Desfaz a última chamada que alterou o modelo. Um nível só. Uma chamada que levanta exceção é revertida automaticamente. |
+| `api(obj, grep)` | Lista os métodos, as assinaturas e as propriedades de um objeto, com filtro opcional. Sai mais barato do que chutar uma assinatura e ler o erro. |
 
 ## A skill
 
