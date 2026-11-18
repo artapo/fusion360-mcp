@@ -141,6 +141,19 @@ def _snapshot() -> str:
     if not groups:
         out.append('  (nenhum)')
 
+    # Mesh bodies are not in bRepBodies; without this an imported STL is
+    # invisible here. ponytail: no grouping, add it if patterns of meshes show up.
+    if r.meshBodies.count:
+        out.append('meshes: %d' % r.meshBodies.count)
+        for m in r.meshBodies:
+            bb = m.boundingBox
+            out.append('  %-26s %gx%gx%g mm  tris:%d%s' % (
+                m.name,
+                round((bb.maxPoint.x - bb.minPoint.x) * 10, 3),
+                round((bb.maxPoint.y - bb.minPoint.y) * 10, 3),
+                round((bb.maxPoint.z - bb.minPoint.z) * 10, 3),
+                m.mesh.triangleCount, '' if m.isVisible else '  [hidden]'))
+
     # What the timeline holds, by type. These are the entries undo() removes,
     # so seeing them saves a reconnaissance call before rolling anything back.
     if parametric and d.timeline.count:

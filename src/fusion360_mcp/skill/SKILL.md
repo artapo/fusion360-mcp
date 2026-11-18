@@ -126,6 +126,13 @@ expressions/parameters; `createByReal(1.0)` is always cm. Prefer
 `createByString` when you want the value to become a parametric expression
 in the model. Examples below abbreviate it as `VI = adsk.core.ValueInput`.
 
+**Mesh files carry no unit.** `exportManager.createSTLExportOptions` writes
+**mm** by default, and `meshBodies.add(path, unit)` trusts whatever unit you
+pass. Re-importing that file with `CentimeterMeshUnit` gives a body 10× too
+big, with no error. Pass the unit the file was written in
+(`MillimeterMeshUnit` for Fusion's own export). For a file from elsewhere,
+check the size afterwards: `snapshot()` lists meshes with their size in mm.
+
 ## Object model
 
 `Application` → `Documents` / `Document` → `Product` (→ `Design`) →
@@ -178,9 +185,13 @@ finally:
     C.bRepBodies.count     1
     root.bRepBodies.count  0
 
-Verified with `createContourFlangeInput`. Base and edge flanges
-(`createBaseFlangeInput`, `createEdgeFlangeInput`) were only ever created
-under `activate()`, so wrap them the same way.
+Verified with `createContourFlangeInput`. The official Sheet Metal Features
+guide (added with the October 2026 API) states the same rule for base,
+contour and lofted flanges: *"activate that component first
+(Occurrence.activate()). Otherwise the new body is created in the root
+component."* Edge flanges extend an existing body, and the guide doesn't
+mention them. `FlangeFeature.createForAssemblyContext` (new in 2706) is the
+usual proxy method that every feature has, not a way around this.
 
 Creating a new component = creating an occurrence:
 
@@ -726,13 +737,15 @@ doesn't exist under that name — look for the related concept.
 
 ## References
 
-- **`references/guides.md`** — 9 guides from the User's Manual: BRep, Design
+- **`references/guides.md`** — guides from the User's Manual: BRep, Design
   Intent, Events, Attributes, Selection Filters, Custom Graphics, Commands,
-  Command Inputs, Threading. Concepts the stubs don't explain.
+  Command Inputs, Threading, Sheet Metal (5 parts) and Configuration Rules.
+  Concepts the stubs don't explain.
 
       sed -n '/^## Attributes/,/^---/p' references/guides.md
 
-- **`references/api-index.md`** — 1106 classes with their doc URLs. Superseded
+- **`references/api-index.md`** — 1981 classes and enums with their doc URLs
+  (October 2026 API). Superseded
   by `api()` and the stubs for everyday use, and it describes the *newest*
   Fusion, which may not be yours — the versioned `deleteObject` trap above
   came from trusting it. Kept for when you want the prose documentation of a
@@ -769,11 +782,51 @@ reported `isValid: True` while both members raised
 enumerated 0. The views become hollow. Do not run it on work you cannot
 afford to reopen.
 
-**`View` cannot be repositioned.** Its entire surface is `classType()`,
-`isValid`, `objectType`, `type` — verified against both the stub and
-`drawing_View.htm`. No position, scale, width or height. Laying out a sheet
-by API is not possible; `tidyUp` is the only rearrange, and it is the one
-above.
+**`View` still cannot be moved after it exists.** On 2704.1.36 its entire
+surface was `classType()`, `isValid`, `objectType`, `type`. The October 2026
+API (2706) added `scaleValue`, `orientation`, `style`, `tangentEdges`,
+`isShowThreadEdges`, `isShowInterferenceEdges` and
+`get/setCenterMarkOptions` / `get/setCenterLineOptions`. Run through
+`fusion_eval` on 2706.1.17:
+
+- They work on **base views only**, getters included: on a projected view
+  (`type == 1`) even reading `scaleValue` raises `failed to read view scale`.
+  Setting `style` on the base view does carry over to its projected views.
+- A view made by automatic drawing creation reads `orientation == 10`
+  (`UnknownViewOrientationType`).
+- There is still no position, width or height. Placement only happens at
+  creation, and it works:
+
+  ```python
+  D = adsk.drawing
+  bi = sheet.views.createBaseViewInput()
+  bi.placementPoint = D.DrawingPoint.create(adsk.core.Point2D.create(330, 80))
+  bi.viewParameters.orientation = D.ViewOrientationTypes.IsoTopRightViewOrientationType
+  v = sheet.views.add(bi)
+  v.scaleValue = 1.5   # set AFTER add, see below
+  v.style = D.DrawingViewStyleTypes.ShadedVisibleEdgesDrawingViewStyleType
+  ```
+
+  `placementPoint` is the **centre** of the view, in sheet millimetres with
+  the origin at the bottom left (A3 is `sheet.width, sheet.height == 420, 297`).
+  The centre stays put when the scale changes later. `viewParameters`
+  honours `orientation`, but **ignores `scaleValue` and `style`**: the new
+  view copied them from the existing base view instead. Set both after
+  `add`.
+- `ViewCurve` exposes `startPoint`/`endPoint`/`centerPoint`/`midPoint` as
+  `DrawingPoint`s (`.coordinate` is the `Point2D`), which is how you find
+  where a view actually landed.
+
+Apart from creating a view in the right place, `tidyUp` is still the only
+rearrange, and it is the one above.
+
+Creating the drawing itself: `adsk.drawing.DrawingManager.get()`
+`.createDrawingInput(design_dataFile, mode)` then `.createDrawing(inp)`. The
+source must be saved (it takes a `DataFile`), the new `.f2d` lands in the same
+cloud folder, and it is **not opened**: `app.documents.open(dataFile)`.
+`ManualDrawingCreationMode` raises *"requires a template with view placeholder
+information"* unless you set `templateFile`; `AutomaticDrawingCreationMode`
+works with no template and lays out a base view plus projections.
 
 Other traps in the same namespace:
 
@@ -786,3 +839,105 @@ Other traps in the same namespace:
   `next(iter(...))` that worked once can raise `StopIteration` later, because
   the collection is only populated in the right context.
 - `Images` has no `count`.
+
+## October 2026 API (2706): retired, removed, renamed
+
+From Autodesk's [What's New](https://help.autodesk.com/cloudhelp/ENU/Fusion-360-API/files/WhatsNew.htm)
+and a diff of the official class list. Retired members still run for a while
+but disappear from code hints; removed ones are gone. Code from older
+examples, or from memory, still uses the left column:
+
+| Old | Use instead |
+|---|---|
+| `GeometricConstraints.addPerpendicular` (retired) | `addPerpendicular2`, which also takes curves other than lines |
+| `ConstructionPlaneInput.setByDistanceOnPath` (retired) | `setByPath` / `setByPathToObject` with a `ConstructionPlanePathDefinition` |
+| `PMILeaderLineNoteInput.geometry` (retired) | `PMILeaderLineNoteInput.geometries`, `PMILeaderLineNote.setGeometries` |
+| `CornerClosureDefinition`, `Two/ThreeBendCornerClosureDefinition` (removed) | `CornerClosureFeature.twoBendCornerOverride` / `threeBendCornerOverride` |
+| `InferredJointInput` (removed) | no direct replacement listed; assembly constraints are still preview and "will be broken" when the final API lands |
+| `volume.TransformRefGraphNodeProperty` (renamed) | `TransformReferenceGraphNodeProperty` |
+
+Also changed: the sketch-constraints selection filter now selects geometric
+constraints only, and dimensions have their own filter. Volumetric modeling
+is no longer preview. Much of the new sheet metal, T-Spline, drawing and
+configuration rules surface is still marked 🧪 in `api-index.md`.
+
+On a Fusion older than 2706, only the left column exists. `api()` settles it.
+
+## Sheet metal: rules and overrides
+
+*Verified through `fusion_eval` on Fusion 2706.1.17, except the Personal Use
+line, which comes from the official guides.*
+
+- **A rule cannot be created from scratch.** Copy one with
+  `design.designSheetMetalRules.addByCopy(rule, name)` and edit the copy.
+  In a design with no sheet metal yet, `designSheetMetalRules` is not empty:
+  even `.count` raises `RuntimeError: InternalValidationError : smDataRoot`.
+  So assign a **library** rule (`design.librarySheetMetalRules`, e.g.
+  `'Steel (mm)'`) to `C.activeSheetMetalRule`, create the first feature, and
+  only then copy rules into the design.
+- `rule.thickness.value` / `bendRadius.value` are in **cm**: `0.25` is 2.5 mm.
+  Setting `.expression = '1.5 mm'` avoids the conversion. `bendRadius` can be
+  an expression such as `'Thickness'`. `kFactor` is a plain float.
+- Edge flange per-edge width: edges passed to `createEdgeFlangeInput` are
+  full-length and cannot be changed later. For other widths, pass `[]` and add
+  them through `inp.edgeDefinitions.addSymmetricEdge(...)` and its siblings.
+  A symmetric width of 5 mm gives a **10 mm** wide flange (it is per side);
+  the bend reliefs add their own width beyond that.
+- `ContourFlangeInput.setSymmetricDirection(ValueInput)` replaces the distance
+  and applies to *each side*: 10 mm gives a 20 mm flange.
+- Hem setters take only `StartEdgeBendPositionType` or
+  `TangentToSideBendPositionType`. `InsideBendPositionType` raises
+  `Invalid bendPositionType argument`; it is for edge flanges.
+- An unfold needs `isUnfoldAllBends = True` or a list of `bendFaces`. With
+  neither, `add` raises `At least one bend face must be specified...`.
+- **Overrides** (`bendRadiusOverride`, `bendReliefOverride`,
+  `two/threeBendCornerOverride`): not every feature has every one. On a base
+  flange, merely *reading* one raises `Base flanges do not support sheet
+  metal rule overrides`. Base, edge and contour flanges are all
+  `FlangeFeature`, so when you loop over `flangeFeatures`, wrap each read in
+  `try`/`except RuntimeError` and skip the ones that raise. A base flange
+  always follows the rule: change `C.activeSheetMetalRule` (or the rule
+  itself) instead. Until an override is set, `.bendRadius` is `None`, which
+  means the rule's value applies: read `rule.bendRadius`.
+  To set one on an existing feature, roll the marker to just before it, or
+  it raises `Didn't roll editing feature back.`:
+
+  ```python
+  f.timelineObject.rollTo(True)
+  f.bendRadiusOverride.setOverride(adsk.core.ValueInput.createByString('4 mm'))
+  design.timeline.moveToEnd()
+  ```
+
+  Don't reuse an input, or an override taken from it, for a second `add()`.
+- **Fusion for Personal Use throws** on overlap corner closures
+  (`setToOverlapAlignmentType`), join by bend, and sheet metal
+  fillets/chamfers. Those are licence errors, not code bugs.
+
+## Configuration rules
+
+*From the official Configuration Rules guide (in `references/guides.md`).
+Only the first bullet is verified through `fusion_eval`; the rest needs a
+configured design.*
+
+- `design.configurationRulesManager` is `None` unless the design is a
+  Configured Design. Check it before doing anything else.
+- Reads work on any licence. Writes need the **Fusion Design Extension**:
+  without it they raise `RuntimeError`, and the issue code is
+  `EXTENSION_REQUIRED`.
+- Everything acts on the **active** design, and a rule is applied as soon as
+  the call returns. It isn't a timeline entry, so the bridge's `undo()`
+  almost certainly won't revert it (not yet tested). Read back the rule
+  before you change it, so you can put it back.
+- Rules live on a server: every read is a round trip. Use `getRules()` /
+  `itemById()` instead of indexing the manager, and check `issues` even on
+  a read.
+- Number values are in **internal units** (400 mm → `40.0`, 90° → `1.5708`).
+  Wherever the operator accepts one, prefer an expression (`'400 mm'`), which
+  carries its own unit.
+- Dropdown values are option **keys**, not labels. They read back as
+  `ConfigurationRuleStringListValue` even if written as `StringValue`.
+- A rule's `body` is replaced wholesale on update. To change one block, fetch
+  the rule, modify its body and resend the whole rule. `name`, `comment` and
+  `isActive` merge individually.
+- Order matters: rules are evaluated top to bottom. A non-empty
+  `orderedRuleIds` must list every rule that survives the delete phase.

@@ -14,6 +14,49 @@ result = snapshot()
 #   ball x7                    2.572 mm3  1.7x1.7x1.7  faces:1
 ```
 
+## What's new
+
+Newest first. To update, close Fusion and run
+`uvx fusion360-mcp@latest install`: it replaces the add-in and the skill.
+
+### Next release (not on PyPI yet)
+
+- **October 2026 Fusion API (2706).** The skill now covers what changed:
+  retired, removed and renamed members with their replacements, sheet metal
+  rules and overrides, configuration rules, the new drawing `View` members,
+  and creating a drawing from code. The sheet metal and drawing notes were
+  checked against a live Fusion 2706.
+- The API index was regenerated from Autodesk's docs (1981 classes and enums,
+  up from 1832), and the official Sheet Metal and Configuration Rules guides
+  were added to the bundled references.
+- `snapshot()` lists mesh bodies, with size, triangle count and hidden
+  state. An imported STL used to be invisible to it.
+- Skill: which component a sheet metal flange lands in ([#14](https://github.com/artapo/fusion360-mcp/pull/14)), and how
+  `addExistingComponent` combines its matrix with the first occurrence ([#15](https://github.com/artapo/fusion360-mcp/pull/15)).
+
+### 0.1.2 (2026-11-08)
+
+- Rollback acts on the document the call changed, works with the timeline
+  marker in the middle, and no longer breaks when a call closes the document
+  it started in.
+- Skill: drawing API traps, plus four notes contributed by
+  [ArnaudUnreal](https://github.com/ArnaudUnreal): extrude direction on each
+  origin plane, dimensions from the origin point, making a feature count
+  follow a parameter, and a missing proxy that shows up as "Invalid entity".
+
+### 0.1.1 (2026-09-04)
+
+- Fixed rollback and undo, including rollback on an empty document.
+- New `api()` helper, which lists an object's methods and signatures.
+- Skill: sketch plane orientation, `participantBodies`, accented names, and
+  appearances.
+
+### 0.1.0 (2026-09-04)
+
+- First release: the MCP server, the Fusion add-in, `snapshot()`,
+  `screenshot()`, `undo()` with automatic rollback, the `fusion360-api`
+  skill, and the `uvx` installer.
+
 ## Install
 
 ```bash
@@ -66,7 +109,7 @@ session.
 ## The tool
 
 `fusion_eval` takes Python source and returns whatever you assign to
-`result`. `adsk`, `app`, `ui`, `design` and `root` are pre-bound, plus three
+`result`. `adsk`, `app`, `ui`, `design` and `root` are pre-bound, plus four
 helpers:
 
 | | |
@@ -74,6 +117,7 @@ helpers:
 | `snapshot()` | Model state as compact text. Identical bodies collapse into one line, so a 50-instance pattern costs the same as one body. |
 | `screenshot(w, h, view)` | Renders the viewport and returns the image inline. Expensive (~10k tokens) — prefer `snapshot()` when numbers are what matter. |
 | `undo()` | Reverts the last call that changed the model. One level. A call that raises is rolled back automatically. |
+| `api(obj, grep)` | Lists an object's methods, signatures and properties, optionally filtered. Cheaper than guessing a signature and reading the error. |
 
 ## The skill
 
