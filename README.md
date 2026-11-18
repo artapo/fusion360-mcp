@@ -19,7 +19,7 @@ result = snapshot()
 Newest first. To update, close Fusion and run
 `uvx fusion360-mcp@latest install`: it replaces the add-in and the skill.
 
-### Next release (not on PyPI yet)
+### 0.1.3 (2026-11-18)
 
 - **October 2026 Fusion API (2706).** The skill now covers what changed:
   retired, removed and renamed members with their replacements, sheet metal

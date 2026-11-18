@@ -14,6 +14,8 @@ jobs:
         python: ["3.9", "3.13"]
         # ubuntu-latest became 26.04, which has no Python 3.9 build.
         # ponytail: pinned to 24.04 for 3.9 only; drop when 3.9 support goes.
+        # macOS jobs sometimes sit in the runner queue for 10+ minutes; that
+        # is GitHub capacity, not the matrix. Cancel and rerun the job.
         exclude:
           - os: ubuntu-latest
             python: "3.9"
